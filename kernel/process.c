@@ -144,6 +144,43 @@ static const char *state_name(proc_state_t state) {
     }
 }
 
+/*
+ * Terminate a process by PID.
+ * L09 - Process state transitions.
+ *
+ * Returns:
+ *   1  = process killed
+ *   0  = PID not found
+ *  -1  = shell cannot be killed
+ */
+int proc_kill(uint32_t pid) {
+    pcb_t *proc = proc_find(pid);
+
+    if (!proc) {
+        return 0;
+    }
+
+    /*
+     * PID 1 is our interactive shell.
+     * Keep it alive so the Stage 1 demo remains usable.
+     */
+    if (proc->pid == 1) {
+        return -1;
+    }
+
+    proc->state = PROC_STATE_ZOMBIE;
+
+    /*
+     * Normally kill is issued by the shell against another process,
+     * but handle the current-process case as well.
+     */
+    if (current_proc == proc) {
+        scheduler_yield();
+    }
+
+    return 1;
+}
+
 void proc_list(void) {
     int i;
 

@@ -38,6 +38,7 @@ static void cmd_mem(void);
 static void cmd_version(void);
 static void cmd_colour(const char *args);
 static void cmd_halt(void);
+static void cmd_kill(const char *args);
 static void cmd_ps(void);
 static void test_process_a(void);
 static void test_process_b(void);
@@ -106,7 +107,7 @@ static void print_splash(void) {
     vga_puts_color("  Stage 0: Kernel Foundations", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
-    vga_puts_color("  Faculty of Engineering – Department of Software Engineering",
+    vga_puts_color("  Faculty of Science - Software Engineering Teaching Unit",
                    VGA_LIGHT_GREY, VGA_BLACK);
 
     vga_set_cursor(4, 2);
@@ -138,24 +139,51 @@ static void print_splash(void) {
 /* ---------------------------------------------------------------------------
  * Shell command implementations
  * --------------------------------------------------------------------------*/
+
 static void cmd_help(void) {
-    vga_puts_color("\n  SENG21213-OS Shell Commands\n", VGA_YELLOW, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  help     – Show this help message\n");
-    vga_puts("  clear    – Clear the screen\n");
-    vga_puts("  about    – About this OS and course\n");
-    vga_puts("  echo     – Echo text to screen\n");
-    vga_puts("  version  – Show kernel version\n");
-    vga_puts("  colour   – Change text colour (usage: colour <fg> <bg>)\n");
-    vga_puts("  halt     – Halt the CPU\n");
-    vga_puts("  mem      – Memory map (stub)\n");
-    vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ps      – [L09] List processes\n");
-    vga_puts("  kill    – [L09] Terminate a process\n");
-    vga_puts("  threads – [L10] List kernel threads\n");
-    vga_puts("  free    – [L11] Show free memory\n");
-    vga_puts("  ls      – [L12] List files\n");
-    vga_puts("  cat     – [L12] Print file contents\n\n");
+    vga_puts_color(
+        "\n  SENG21213-OS Shell Commands\n",
+        VGA_YELLOW,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  ---------------------------------------------\n"
+        "  help          Show this help message\n"
+        "  clear         Clear the screen\n"
+        "  about         About this OS and course\n"
+        "  echo <text>   Echo text to screen\n"
+        "  version       Show kernel version\n"
+        "  colour <fg> <bg>  Change text colour\n"
+        "  halt          Halt the CPU\n"
+        "  mem           Memory map (stub)\n"
+        "\n"
+    );
+
+    vga_puts_color(
+        "  Stage 1 - Process Management\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  ps            List processes and CPU ticks\n"
+        "  kill <pid>    Terminate a process\n"
+        "\n"
+    );
+
+    vga_puts_color(
+        "  Future milestones\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  threads       [L10] List kernel threads\n"
+        "  free          [L11] Show free memory\n"
+        "  ls            [L12] List files\n"
+        "  cat           [L12] Print file contents\n"
+    );
 }
 
 static void cmd_clear(void) {
@@ -169,7 +197,7 @@ static void cmd_about(void) {
     vga_puts("  Bootloader   : Custom MBR (NASM)\n");
     vga_puts("  Kernel       : Freestanding C (GCC, no libc)\n");
     vga_puts("  VM Target    : QEMU (qemu-system-i386)\n");
-    vga_puts("  Course       : SENG 21213 – Sem 2\n");
+    vga_puts("  Course     static void cmd_help(void)  : SENG 21213 – Sem 2\n");
     vga_puts("  Reference    : Stallings, OS: Internals & Design Principles\n\n");
 }
 
@@ -241,6 +269,41 @@ static void cmd_ps(void) {
     proc_list();
 }
 
+static void cmd_kill(const char *args) {
+    const char *pid_text = k_ltrim(args);
+
+    if (k_strlen(pid_text) == 0) {
+        vga_puts_color(
+            "  Usage: kill <pid>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    uint32_t pid = (uint32_t)k_atoi(pid_text);
+
+    int result = proc_kill(pid);
+
+    if (result == 1) {
+        vga_printf("  Process %d killed.\n", pid);
+    }
+    else if (result == -1) {
+        vga_puts_color(
+            "  Cannot kill the shell process.\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+    }
+    else {
+        vga_puts_color(
+            "  No such process.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    }
+}
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -285,15 +348,26 @@ static void shell_run(void) {
             cmd_colour("");
             continue;
         }
-                /* Stage 1 - process list */
+
+          /* Stage 1 - process list */
         if (k_strcmp(cmd, "ps") == 0) {
             cmd_ps();
             continue;
         }
 
+          /* Stage 1 - kill process */
+        if (k_strncmp(cmd, "kill ", 5) == 0) {
+            cmd_kill(k_ltrim(cmd + 5));
+            continue;
+        }
+
+        if (k_strcmp(cmd, "kill") == 0) {
+            cmd_kill("");
+            continue;
+        } 
+
         /* Milestone stubs for later stages */
-        if (k_strcmp(cmd, "kill")    == 0 ||
-            k_strcmp(cmd, "threads") == 0 ||
+        if (k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
             k_strcmp(cmd, "ls")      == 0 ||
             k_strcmp(cmd, "cat")     == 0) {

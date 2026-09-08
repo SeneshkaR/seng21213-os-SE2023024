@@ -43,4 +43,6 @@ void proc_exit(void);
 
 void proc_list(void);
 
+int proc_kill(uint32_t pid);
+
 #endif
