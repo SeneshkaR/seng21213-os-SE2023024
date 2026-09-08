@@ -1,19 +1,21 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 0 – Foundations)
+ * SENG21213-OS :: Main Kernel  (Stage 1 – Process Management)
  * File   : kernel/kernel.c
  *
  * PURPOSE
- *   This is the heart of your operating system. Right now it:
+ *   This is the heart of your operating system. It now includes:
  *     1. Initialises VGA text-mode display
  *     2. Initialises the keyboard driver
- *     3. Prints a splash screen
- *     4. Runs a minimal interactive shell ("ksh")
+ *     3. Initialises IDT, PIT, and scheduler (Stage 1)
+ *     4. Prints a splash screen
+ *     5. Runs a minimal interactive shell ("ksh") as a scheduled process
+ *     6. Two demo processes run concurrently with visible output
  *
- * ASSIGNMENT MILESTONES  (what YOU will add in later lectures)
- *   Lecture  9  – Process Management  →  process.h / process.c / scheduler.c
- *   Lecture 10  – Threads             →  thread.h  / thread.c
- *   Lecture 11  – Memory Management   →  pmm.h     / pmm.c / vmm.c
- *   Lecture 12  – File System         →  fs.h      / fs.c
+ * ASSIGNMENT MILESTONES
+ *   ✅ Lecture  9  – Process Management  →  process.c, scheduler.c, switch.asm
+ *   ⏳ Lecture 10  – Threads             →  thread.c, mutex.c, semaphore.c
+ *   ⏳ Lecture 11  – Memory Management   →  pmm.c, vmm.c
+ *   ⏳ Lecture 12  – File System         →  fs.c, ramdisk.c
  *
  * CODING CONVENTION
  *   - Prefix kernel-internal functions with k_ (e.g. k_strcmp)
@@ -104,7 +106,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 0: Kernel Foundations", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 1: Process Table & Round-Robin Scheduler", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Science - Software Engineering Teaching Unit",
@@ -124,9 +126,9 @@ static void print_splash(void) {
     vga_puts("  from bare metal. There is no Linux or Windows underneath – only\n");
     vga_puts("  the code you and your team write.\n");
     vga_puts("\n");
-    vga_puts("  Assignment milestones to implement:\n");
-    vga_puts_color("    [L09] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("Process Management  – PCB, ready queue, round-robin scheduler\n");
+    vga_puts("  Assignment milestones:\n");
+    vga_puts_color("    [L09] ", VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_puts("Process Management  – DONE\n");
     vga_puts_color("    [L10] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("Threads & Sync      – kernel threads, mutex, semaphore\n");
     vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
@@ -197,7 +199,7 @@ static void cmd_about(void) {
     vga_puts("  Bootloader   : Custom MBR (NASM)\n");
     vga_puts("  Kernel       : Freestanding C (GCC, no libc)\n");
     vga_puts("  VM Target    : QEMU (qemu-system-i386)\n");
-    vga_puts("  Course     static void cmd_help(void)  : SENG 21213 – Sem 2\n");
+    vga_puts("  Course       : SENG 21213 – Sem 2\n");
     vga_puts("  Reference    : Stallings, OS: Internals & Design Principles\n\n");
 }
 
@@ -223,8 +225,8 @@ static void cmd_mem(void) {
 static void cmd_version(void) {
     vga_puts_color("\n  SENG21213-OS Version\n", VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  Stage 0: Kernel Foundations\n");
-    vga_puts("  Version: 0.1.0\n");
+    vga_puts("  Stage 1: Process Table & Round-Robin Scheduler\n");
+    vga_puts("  Version: 0.2.0\n");
     vga_puts("  Build Date: " __DATE__ " " __TIME__ "\n");
     vga_puts("  Compiler: GCC " __VERSION__ "\n");
     vga_puts("  Architecture: x86 (i686) 32-bit Protected Mode\n");
@@ -322,7 +324,7 @@ static void shell_run(void) {
         const char *cmd = k_ltrim(shell_buf);
         if (k_strlen(cmd) == 0) continue;
 
-        /* Dispatch - Stage 0 commands */
+        /* Dispatch - Stage 0 & 1 commands */
         if (k_strcmp(cmd, "help")    == 0) { cmd_help();    continue; }
         if (k_strcmp(cmd, "clear")   == 0) { cmd_clear();   continue; }
         if (k_strcmp(cmd, "about")   == 0) { cmd_about();   continue; }
@@ -392,16 +394,24 @@ static void shell_run(void) {
 }
 
 static void test_process_a(void) {
+    /* L09 §4 - Demo process that prints visible output at a faster rate */
     while (1) {
-        /* Process A is intentionally doing CPU work. */
-        __asm__ __volatile__("nop");
+        vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+        vga_puts("[A]");
+        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        /* Delay loop - shorter than process B for faster printing */
+        for (volatile int i = 0; i < 3000000; i++);
     }
 }
 
 static void test_process_b(void) {
+    /* L09 §4 - Demo process that prints visible output at a slower rate */
     while (1) {
-        /* Process B is intentionally doing CPU work. */
-        __asm__ __volatile__("nop");
+        vga_set_color(VGA_YELLOW, VGA_BLACK);
+        vga_puts("[B]");
+        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        /* Delay loop - longer than process A for slower printing */
+        for (volatile int i = 0; i < 6000000; i++);
     }
 }
 
