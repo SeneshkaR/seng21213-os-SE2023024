@@ -23,6 +23,8 @@
 
 #include "vga.h"
 #include "keyboard.h"
+#include "process.h"
+#include "scheduler.h"
 #include "../include/types.h"
 
 /* ---------------------------------------------------------------------------
@@ -36,6 +38,9 @@ static void cmd_mem(void);
 static void cmd_version(void);
 static void cmd_colour(const char *args);
 static void cmd_halt(void);
+static void cmd_ps(void);
+static void test_process_a(void);
+static void test_process_b(void);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -232,6 +237,10 @@ static void cmd_halt(void) {
     while (1) __asm__ __volatile__("hlt");
 }
 
+static void cmd_ps(void) {
+    proc_list();
+}
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -276,17 +285,29 @@ static void shell_run(void) {
             cmd_colour("");
             continue;
         }
+                /* Stage 1 - process list */
+        if (k_strcmp(cmd, "ps") == 0) {
+            cmd_ps();
+            continue;
+        }
 
-        /* Milestone stubs */
-        if (k_strcmp(cmd, "ps")      == 0 ||
-            k_strcmp(cmd, "kill")    == 0 ||
+        /* Milestone stubs for later stages */
+        if (k_strcmp(cmd, "kill")    == 0 ||
             k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
             k_strcmp(cmd, "ls")      == 0 ||
             k_strcmp(cmd, "cat")     == 0) {
-            vga_puts_color("  [TODO] This command is not yet implemented.\n",
-                           VGA_YELLOW, VGA_BLACK);
-            vga_puts("  Implement it as part of your lecture assignment.\n");
+
+            vga_puts_color(
+                "  [TODO] This command is not yet implemented.\n",
+                VGA_YELLOW,
+                VGA_BLACK
+            );
+
+            vga_puts(
+                "  Implement it as part of your lecture assignment.\n"
+            );
+
             continue;
         }
 
@@ -296,15 +317,52 @@ static void shell_run(void) {
     }
 }
 
+static void test_process_a(void) {
+    while (1) {
+        /* Process A is intentionally doing CPU work. */
+        __asm__ __volatile__("nop");
+    }
+}
+
+static void test_process_b(void) {
+    while (1) {
+        /* Process B is intentionally doing CPU work. */
+        __asm__ __volatile__("nop");
+    }
+}
+
 /* ---------------------------------------------------------------------------
  * Kernel entry point – called from kernel_entry.asm
- * --------------------------------------------------------------------------*/
+ * -------------------------------------------------------------------------*/
+
 void kernel_main(void) {
     vga_init();
     kb_init();
-    print_splash();
-    shell_run();
 
-    /* Should never reach here */
-    __asm__ __volatile__("hlt");
+    /* Stage 1 initialization */
+    proc_init();
+    scheduler_init();
+
+    print_splash();
+
+    /*
+     * Schedule the shell together with the two test processes.
+     */
+    proc_create("shell", shell_run);
+    proc_create("process-A", test_process_a);
+    proc_create("process-B", test_process_b);
+
+    /*
+     * Start PIT IRQ0 round-robin scheduling.
+     */
+    scheduler_start();
+
+    /*
+     * kernel_main is no longer doing shell work.
+     * Wait until the scheduler switches to a process.
+     */
+    while (1) {
+        __asm__ __volatile__("hlt");
+    }
 }
+
