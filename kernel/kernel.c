@@ -26,6 +26,7 @@
 #include "process.h"
 #include "scheduler.h"
 #include "../include/types.h"
+#include "thread.h"
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -42,6 +43,11 @@ static void cmd_kill(const char *args);
 static void cmd_ps(void);
 static void test_process_a(void);
 static void test_process_b(void);
+static void cmd_threads(void);
+
+static void test_thread_a(void *arg);
+static void test_thread_b(void *arg);
+
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -159,7 +165,6 @@ static void cmd_help(void) {
         "  mem           Memory map (stub)\n"
         "\n"
     );
-
     vga_puts_color(
         "  Stage 1 - Process Management\n",
         VGA_LIGHT_CYAN,
@@ -173,13 +178,23 @@ static void cmd_help(void) {
     );
 
     vga_puts_color(
+        "  Stage 2 - Threads & Synchronization\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  threads       Create and run kernel thread demo\n"
+        "\n"
+    );
+
+    vga_puts_color(
         "  Future milestones\n",
         VGA_LIGHT_CYAN,
         VGA_BLACK
     );
 
     vga_puts(
-        "  threads       [L10] List kernel threads\n"
         "  free          [L11] Show free memory\n"
         "  ls            [L12] List files\n"
         "  cat           [L12] Print file contents\n"
@@ -310,6 +325,55 @@ static void cmd_kill(const char *args) {
 static char  shell_buf[256];
 static char  prompt[] = "\n  ksh> ";
 
+static void test_thread_a(void *arg)
+{
+    (void)arg;
+
+    for (int i = 0; i < 8; i++) {
+        vga_puts("[T1] ");
+        scheduler_yield();
+    }
+
+    vga_puts("\nThread 1 finished.\n");
+    thread_exit();
+}
+
+static void test_thread_b(void *arg)
+{
+    (void)arg;
+
+    for (int i = 0; i < 8; i++) {
+        vga_puts("[T2] ");
+        scheduler_yield();
+    }
+
+    vga_puts("\nThread 2 finished.\n");
+    thread_exit();
+}
+
+static void cmd_threads(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    vga_puts("\nCreating two Stage 2 kernel threads...\n");
+
+    t1 = thread_create(test_thread_a, 0);
+    t2 = thread_create(test_thread_b, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "Failed to create threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    vga_printf("Thread %d created.\n", t1->tid);
+    vga_printf("Thread %d created.\n", t2->tid);
+}
+
 static void shell_run(void) {
     vga_puts_color("\n  Kernel Shell ready. Type 'help' for commands.\n",
                    VGA_LIGHT_GREEN, VGA_BLACK);
@@ -364,13 +428,17 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "kill") == 0) {
             cmd_kill("");
             continue;
-        } 
+        }
+        /* Stage 2 - kernel thread demo */
+        if (k_strcmp(cmd, "threads") == 0) {
+            cmd_threads();
+            continue;
+         }
 
-        /* Milestone stubs for later stages */
-        if (k_strcmp(cmd, "threads") == 0 ||
-            k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
+        /* Future milestones */
+        if (k_strcmp(cmd, "free") == 0 ||
+            k_strcmp(cmd, "ls")   == 0 ||
+            k_strcmp(cmd, "cat")  == 0) {
 
             vga_puts_color(
                 "  [TODO] This command is not yet implemented.\n",
@@ -413,8 +481,9 @@ void kernel_main(void) {
     vga_init();
     kb_init();
 
-    /* Stage 1 initialization */
+    /* Stage 2 initialization */
     proc_init();
+    thread_init();
     scheduler_init();
 
     print_splash();
