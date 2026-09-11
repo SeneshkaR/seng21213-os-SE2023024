@@ -94,7 +94,7 @@ static volatile int buffer_count = 0;
 
 static semaphore_t empty_sem;   /* Counts empty slots  */
 static semaphore_t full_sem;    /* Counts filled slots */
-static mutex_t    buffer_mutex; /* Protects buffer access */
+static semaphore_t buffer_mutex; /* Binary semaphore for buffer access */
 
 static volatile int sem_done = 0;
 
@@ -561,12 +561,12 @@ static void cmd_mutexdemo(void)
 }
 
 /* ---------------------------------------------------------------------------
- * Stage 2 / L10 §5 — Bounded-Buffer Producer/Consumer with Semaphores
+ * Stage 2 / L10 §5 — Bounded-Buffer Producer/Consumer with Three Semaphores
  *
- * Uses three synchronization primitives:
- *   - empty_sem  : counts empty buffer slots (initialised to BUFFER_SIZE)
- *   - full_sem   : counts filled buffer slots (initialised to 0)
- *   - buffer_mutex : protects the shared buffer array
+ * Uses three semaphores:
+ *   - empty_sem    : counts empty buffer slots (initialised to BUFFER_SIZE)
+ *   - full_sem     : counts filled buffer slots (initialised to 0)
+ *   - buffer_mutex : binary semaphore for mutual exclusion (initialised to 1)
  *
  * Reference: Stallings Ch.4 — Producer/Consumer problem
  * --------------------------------------------------------------------------*/
@@ -580,12 +580,12 @@ static void sem_producer(void *arg)
         /* Wait for an empty slot */
         sem_wait(&empty_sem);
 
-        mutex_lock(&buffer_mutex);
+        sem_wait(&buffer_mutex);
         buffer[buffer_count] = id * 100 + i;
         buffer_count++;
         vga_printf("  Producer %d inserted item %d (buffer: %d/%d)\n",
                    id, buffer[buffer_count - 1], buffer_count, BUFFER_SIZE);
-        mutex_unlock(&buffer_mutex);
+        sem_signal(&buffer_mutex);
 
         /* Signal that a slot is now full */
         sem_signal(&full_sem);
@@ -603,16 +603,16 @@ static void sem_consumer(void *arg)
 
     (void)arg;
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 10; i++) {
         /* Wait for a full slot */
         sem_wait(&full_sem);
 
-        mutex_lock(&buffer_mutex);
+        sem_wait(&buffer_mutex);
         buffer_count--;
         int item = buffer[buffer_count];
         vga_printf("  Consumer extracted item %d (buffer: %d/%d)\n",
                    item, buffer_count, BUFFER_SIZE);
-        mutex_unlock(&buffer_mutex);
+        sem_signal(&buffer_mutex);
 
         /* Signal that a slot is now empty */
         sem_signal(&empty_sem);
@@ -633,7 +633,7 @@ static void cmd_semdemo(void)
 
     sem_init(&empty_sem, BUFFER_SIZE);
     sem_init(&full_sem, 0);
-    mutex_init(&buffer_mutex);
+    sem_init(&buffer_mutex, 1);
 
     vga_puts("\n");
     vga_puts("========================================\n");
