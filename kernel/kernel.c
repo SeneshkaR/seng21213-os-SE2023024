@@ -48,6 +48,23 @@ static void cmd_threads(void);
 static void test_thread_a(void *arg);
 static void test_thread_b(void *arg);
 
+static void cmd_race(void);
+static void race_thread(void *arg);
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 - Race condition demonstration
+ * --------------------------------------------------------------------------*/
+
+/*
+ * Both race-demo threads modify this same variable.
+ * volatile forces actual memory reads/writes so the race is visible.
+ */
+static volatile int myglobal = 0;
+
+/* Number of race-demo threads that have finished. */
+static volatile int race_done = 0;
+
+#define RACE_ITERATIONS 1000
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -185,6 +202,7 @@ static void cmd_help(void) {
 
     vga_puts(
         "  threads       Create and run kernel thread demo\n"
+        "  race          Demonstrate myglobal race without mutex\n"
         "\n"
     );
 
@@ -351,6 +369,120 @@ static void test_thread_b(void *arg)
     thread_exit();
 }
 
+/*
+ * Stage 2 / L10
+ *
+ * Deliberately unsafe increment:
+ *
+ *     read myglobal
+ *     yield
+ *     write myglobal + 1
+ *
+ * Another thread can modify myglobal between the read and write,
+ * producing lost updates.
+ */
+static void race_thread(void *arg)
+{
+    int i;
+
+    (void)arg;
+
+    for (i = 0; i < RACE_ITERATIONS; i++) {
+        int temp;
+
+        /* READ shared value */
+        temp = myglobal;
+
+        /*
+         * Force a context switch between read and write.
+         * This makes the race condition easy to demonstrate.
+         */
+        scheduler_yield();
+
+        /* WRITE based on the old value */
+        myglobal = temp + 1;
+    }
+
+    race_done++;
+
+    thread_exit();
+}
+
+static void cmd_race(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    myglobal = 0;
+    race_done = 0;
+
+    vga_puts("\n");
+    vga_puts("========================================\n");
+    vga_puts(" Stage 2 - Race Condition Demo\n");
+    vga_puts(" WITHOUT MUTEX\n");
+    vga_puts("========================================\n");
+
+    vga_printf(
+        "Two threads increment myglobal %d times each.\n",
+        RACE_ITERATIONS
+    );
+
+    vga_printf(
+        "Expected final value: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_puts("Starting race...\n\n");
+
+    t1 = thread_create(race_thread, 0);
+    t2 = thread_create(race_thread, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "ERROR: Could not create race threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * The shell waits, but yields the CPU so the two worker
+     * threads can run.
+     */
+    while (race_done < 2) {
+        scheduler_yield();
+    }
+
+    vga_puts("\nRace completed.\n");
+
+    vga_printf(
+        "Expected: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_printf(
+        "Actual:   %d\n",
+        myglobal
+    );
+
+    if (myglobal != RACE_ITERATIONS * 2) {
+        vga_puts_color(
+            "RESULT: RACE CONDITION DETECTED - lost updates occurred.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    } else {
+        vga_puts_color(
+            "RESULT: No lost update observed in this run.\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+    }
+
+    vga_puts("\n");
+}
+
 static void cmd_threads(void)
 {
     thread_t *t1;
@@ -432,6 +564,12 @@ static void shell_run(void) {
         /* Stage 2 - kernel thread demo */
         if (k_strcmp(cmd, "threads") == 0) {
             cmd_threads();
+            continue;
+         }
+
+        /* Stage 2 - race condition without mutex */
+        if (k_strcmp(cmd, "race") == 0) {
+            cmd_race();
             continue;
          }
 
