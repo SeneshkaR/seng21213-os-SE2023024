@@ -27,6 +27,7 @@
 #include "scheduler.h"
 #include "../include/types.h"
 #include "thread.h"
+#include "mutex.h"
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -51,6 +52,9 @@ static void test_thread_b(void *arg);
 static void cmd_race(void);
 static void race_thread(void *arg);
 
+static void cmd_mutexdemo(void);
+static void mutex_thread(void *arg);
+
 /* ---------------------------------------------------------------------------
  * Stage 2 - Race condition demonstration
  * --------------------------------------------------------------------------*/
@@ -65,6 +69,9 @@ static volatile int myglobal = 0;
 static volatile int race_done = 0;
 
 #define RACE_ITERATIONS 1000
+
+static mutex_t myglobal_mutex;
+static volatile int mutex_done = 0;
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -191,6 +198,7 @@ static void cmd_help(void) {
     vga_puts(
         "  ps            List processes and CPU ticks\n"
         "  kill <pid>    Terminate a process\n"
+        "  mutexdemo     Run same race protected by mutex\n"
         "\n"
     );
 
@@ -408,6 +416,110 @@ static void race_thread(void *arg)
     thread_exit();
 }
 
+static void mutex_thread(void *arg)
+{
+    int i;
+
+    (void)arg;
+
+    for (i = 0; i < RACE_ITERATIONS; i++) {
+
+        mutex_lock(&myglobal_mutex);
+
+        /*
+         * Critical section.
+         */
+        int temp = myglobal;
+
+        /*
+         * Force scheduling while lock is held.
+         * The other thread must block on the mutex.
+         */
+        scheduler_yield();
+
+        myglobal = temp + 1;
+
+        mutex_unlock(&myglobal_mutex);
+    }
+
+    mutex_done++;
+
+    thread_exit();
+}
+
+static void cmd_mutexdemo(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    myglobal = 0;
+    mutex_done = 0;
+
+    mutex_init(&myglobal_mutex);
+
+    vga_puts("\n");
+    vga_puts("========================================\n");
+    vga_puts(" Stage 2 - Mutex Demo\n");
+    vga_puts(" WITH MUTEX\n");
+    vga_puts("========================================\n");
+
+    vga_printf(
+        "Two threads increment myglobal %d times each.\n",
+        RACE_ITERATIONS
+    );
+
+    vga_printf(
+        "Expected final value: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_puts("Starting protected test...\n\n");
+
+    t1 = thread_create(mutex_thread, 0);
+    t2 = thread_create(mutex_thread, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "ERROR: Could not create mutex test threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    while (mutex_done < 2) {
+        scheduler_yield();
+    }
+
+    vga_puts("\nMutex test completed.\n");
+
+    vga_printf(
+        "Expected: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_printf(
+        "Actual:   %d\n",
+        myglobal
+    );
+
+    if (myglobal == RACE_ITERATIONS * 2) {
+        vga_puts_color(
+            "RESULT: PASS - mutex prevented lost updates.\n",
+            VGA_LIGHT_GREEN,
+            VGA_BLACK
+        );
+    } else {
+        vga_puts_color(
+            "RESULT: FAIL - data corruption detected.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    }
+
+    vga_puts("\n");
+}
+
 static void cmd_race(void)
 {
     thread_t *t1;
@@ -570,6 +682,11 @@ static void shell_run(void) {
         /* Stage 2 - race condition without mutex */
         if (k_strcmp(cmd, "race") == 0) {
             cmd_race();
+            continue;
+         }
+
+        if (k_strcmp(cmd, "mutexdemo") == 0) {
+            cmd_mutexdemo();
             continue;
          }
 

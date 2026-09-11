@@ -25,13 +25,17 @@ static thread_t *current_thread = 0;
 /* -------------------------------------------------------------------------
  * Find an unused thread table entry.
  * ------------------------------------------------------------------------- */
+
 static thread_t *find_free_thread(void)
 {
     int i;
 
     for (i = 0; i < MAX_THREADS; i++) {
-        if (thread_table[i].state == THREAD_UNUSED ||
-            thread_table[i].state == THREAD_TERMINATED) {
+        /*
+         * Do not reuse TERMINATED entries yet.
+         * They are still linked into the scheduler's circular queue.
+         */
+        if (thread_table[i].state == THREAD_UNUSED) {
             return &thread_table[i];
         }
     }
@@ -56,6 +60,7 @@ void thread_init(void)
         thread_table[i].owner = 0;
         thread_table[i].stack_top = 0;
         thread_table[i].next = 0;
+        thread_table[i].wait_next = 0;
     }
 
     next_tid = 1;
@@ -153,6 +158,7 @@ thread_t *thread_create(void (*fn)(void *), void *arg)
 
     thread->esp = (uint32_t)sp;
     thread->next = 0;
+    thread->wait_next = 0;
 
     /* Add the new thread to the scheduler. */
     scheduler_add_thread(thread);

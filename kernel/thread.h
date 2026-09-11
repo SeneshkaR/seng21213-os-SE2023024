@@ -31,7 +31,12 @@ typedef struct thread {
 
     void *stack_top;
 
+    /* Scheduler round-robin queue */
     struct thread *next;
+
+    /* Mutex / semaphore waiting queue */
+    struct thread *wait_next;
+
 } thread_t;
 
 
