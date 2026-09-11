@@ -897,21 +897,31 @@ static void shell_run(void) {
 }
 
 static void test_process_a(void) {
-    /* L09 - Demo process that prints visible output at a faster rate */
+    int count = 0;
+
     while (1) {
-        vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-        vga_puts("[A]");
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        if (count < 10) {
+            vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+            vga_puts("[A]");
+            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+            count++;
+        }
+
         for (volatile int i = 0; i < 3000000; i++);
     }
 }
 
 static void test_process_b(void) {
-    /* L09 - Demo process that prints visible output at a slower rate */
+    int count = 0;
+
     while (1) {
-        vga_set_color(VGA_YELLOW, VGA_BLACK);
-        vga_puts("[B]");
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        if (count < 10) {
+            vga_set_color(VGA_YELLOW, VGA_BLACK);
+            vga_puts("[B]");
+            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+            count++;
+        }
+
         for (volatile int i = 0; i < 6000000; i++);
     }
 }
