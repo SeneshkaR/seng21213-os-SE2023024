@@ -1,4 +1,4 @@
-# SENG21213-OS — Stage 2: Threads & Synchronization
+# SENG21213-OS — Stage 3: Physical Memory Manager
 
 > **Course**: SENG 21213 – Computer Architecture & Operating Systems  
 > **Year**: 2nd Year, Software Engineering  
@@ -8,7 +8,7 @@
 
 ## What Is This?
 
-This is **Stage 2** of your semester-long OS assignment. Over 5 lecture milestones
+This is **Stage 3** of your semester-long OS assignment. Over 5 lecture milestones
 (Lectures 8–12), your team will transform this minimal kernel into a functioning
 operating system with process management, threading, memory management, and a
 file system.
@@ -16,7 +16,7 @@ file system.
 ```
 seng21213-os/
 ├── boot/
-│   ├── boot.asm          ← MBR Bootloader (NASM, 16-bit → 32-bit transition)
+│   ├── boot.asm          ← MBR Bootloader (NASM, 16-bit → 32-bit transition + E820 map)
 │   └── switch.asm        ← IRQ0 context switch stub (pushad/iretd)
 ├── kernel/
 │   ├── kernel_entry.asm  ← Protected-mode entry, calls kernel_main()
@@ -27,7 +27,8 @@ seng21213-os/
 │   ├── scheduler.c / .h  ← Stage 1+2: IDT, PIC, PIT, round-robin scheduler
 │   ├── thread.c / .h     ← Stage 2: kernel threads with own stacks
 │   ├── mutex.c / .h      ← Stage 2: blocking mutex with wait queue
-│   └── semaphore.c / .h  ← Stage 2: counting semaphore
+│   ├── semaphore.c / .h  ← Stage 2: counting semaphore
+│   └── pmm.c / pmm.h     ← Stage 3: Physical Memory Manager (bitmap allocator)
 ├── include/
 │   └── types.h           ← Primitive types (no libc!)
 ├── linker.ld             ← Linker script (kernel at 0x10000)
@@ -45,7 +46,7 @@ seng21213-os/
 | L08 | Stage 0 – Boot + VGA + Shell | Done | *Given* |
 | L09 | Process Management | Done | `kernel/process.c`, `kernel/scheduler.c`, `boot/switch.asm` |
 | L10 | Threads & Synchronisation | Done | `kernel/thread.c`, `kernel/mutex.c`, `kernel/semaphore.c` |
-| L11 | Memory Management | TODO | `kernel/pmm.c`, `kernel/vmm.c` |
+| L11 | Memory Management | **Done** | `kernel/pmm.c`, `kernel/pmm.h` |
 | L12 | File System | TODO | `kernel/fs.c`, `kernel/ramdisk.c` |
 
 ---
@@ -103,7 +104,8 @@ BIOS (firmware in ROM)
   ▼
 boot/boot.asm  (Real Mode, 16-bit)
   │  Prints "Loading SENG21213-OS..."
-  │  Reads 64 sectors (kernel) from disk into RAM at 0x10000
+  │  Collects BIOS E820 memory map → stores at 0x4FFC (count) and 0x5000 (entries)
+  │  Reads 128 sectors (kernel) from disk into RAM at 0x10000
   │  Sets up GDT (Global Descriptor Table)
   │  Switches CPU to 32-bit Protected Mode
   │  Far-jumps to 0x10000
@@ -114,6 +116,10 @@ kernel/kernel_entry.asm  (Protected Mode, 32-bit)
 kernel/kernel.c  →  kernel_main()
   │  vga_init()     – set up text display
   │  kb_init()      – set up keyboard
+  │  proc_init()    – initialize process table
+  │  thread_init()  – initialize thread system
+  │  scheduler_init() – set up round-robin scheduler
+  │  pmm_init()     – parse E820 map, build page-frame bitmap
   │  print_splash() – welcome screen
   │  shell_run()    – interactive shell (infinite loop)
   ▼
@@ -148,6 +154,84 @@ pcb_t *process_create(void (*entry)(void));
 void   process_yield(void);        /* Trigger context switch */
 void   process_exit(void);
 void   scheduler_tick(void);       /* Called by timer IRQ (Lecture 10) */
+```
+
+---
+
+## Stage 3: Physical Memory Manager (Lecture 11)
+
+Stage 3 implements a bitmap-based physical memory manager that tracks 4 KB page frames.
+
+### Implementation Details
+
+**BIOS E820 Memory Map Collection** (`boot/boot.asm`)
+- Bootloader collects memory map using INT 0x15, EAX=0xE820 in Real Mode
+- Entry count stored at `0x4FFC` (16-bit)
+- Entries stored at `0x5000` (24 bytes each: base, length, type, ACPI flags)
+- Map passed to kernel before switching to Protected Mode
+
+**Bitmap Allocator** (`kernel/pmm.c`)
+- 1 bit per 4 KB physical page frame
+- Supports up to 128 MB (32,768 frames, 4 KB bitmap)
+- Initialization: marks all frames as used, then frees usable E820 regions
+- Reserves first 1 MB for BIOS, bootloader, kernel, stacks
+
+**Key Functions**
+```c
+void pmm_init(void);              // Parse E820 map, build bitmap
+uint32_t pmm_alloc_frame(void);   // First-fit allocation, returns physical address
+void pmm_free_frame(uint32_t);    // Free frame by physical address
+uint32_t pmm_total_frames(void);  // Total allocatable frames
+uint32_t pmm_used_frames(void);   // Currently allocated frames
+uint32_t pmm_free_frames(void);   // Available frames
+```
+
+### Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `meminfo` | Display physical memory statistics and run self-test |
+
+### Key Concepts Demonstrated
+
+- **E820 Memory Map**: BIOS interrupt 0x15 reports which physical address ranges are usable RAM, reserved, or ACPI reclaimable
+- **Bitmap Allocation**: Each bit represents one 4 KB page frame. Bit 0 = free, bit 1 = allocated
+- **First-Fit Algorithm**: `pmm_alloc_frame()` scans from frame 0 upward, returning the first free frame
+- **Frame Validation**: `pmm_free_frame()` checks alignment, range, and prevents double-free
+- **Self-Test**: `meminfo` allocates 100 frames, verifies the count increases by 100, frees them, and verifies no leaks
+
+### Testing Stage 3
+
+After building and running (`make run`), verify the deliverable:
+
+| Test | Command | Expected Result |
+|------|---------|-----------------|
+| Memory info | `meminfo` | Shows total/used/free frames and KB/MB |
+| Self-test | (automatic in `meminfo`) | "PASS: 100 frames allocated and freed, no leaks." |
+
+### What to look for
+
+- **`meminfo`**: Should show ~7168 total frames (28 MB) for QEMU with `-m 32M`
+- **Used frames**: Initially 0 (no allocations yet)
+- **Free frames**: Matches total frames
+- **Self-test**: Must show "PASS" — proves allocation and deallocation work correctly with no memory leaks
+
+### Example Output
+
+```
+Physical Memory Manager (L11 §3)
+---------------------------------------------
+Frame size       : 4 KB (4096 bytes)
+Total frames     : 7168
+Used frames      : 0
+Free frames      : 7168
+
+Total memory     : 28672 KB (28 MB)
+Used memory      : 0 KB
+Free memory      : 28672 KB (28 MB)
+
+Self-test: allocating 100 frames...
+PASS: 100 frames allocated and freed, no leaks.
 ```
 
 ---
@@ -215,6 +299,15 @@ gdb
 (gdb) break kernel_main
 (gdb) continue
 
+# Inspect the E820 memory map (in GDB)
+(gdb) x/1xh 0x4FFC          # Entry count
+(gdb) x/24xb 0x5000         # First E820 entry (24 bytes)
+
+# Inspect the PMM bitmap (in GDB)
+(gdb) print pmm_total_frames()
+(gdb) print pmm_used_frames()
+(gdb) print pmm_free_frames()
+
 # Inspect the disk image
 xxd seng21213-os.img | head -32    # View MBR
 xxd seng21213-os.img | grep -c aa55  # Verify boot signature
@@ -231,6 +324,8 @@ xxd seng21213-os.img | grep -c aa55  # Verify boot signature
 | Interrupts / IDT | Stallings Ch.1; OSDev: IDT |
 | Process Management | Stallings Ch.3–4 (your lecture notes) |
 | Memory Management | Stallings Ch.7–8 (your lecture notes) |
+| BIOS E820 Map | OSDev Wiki: Memory Map (x86) |
+| Bitmap Allocator | Stallings Ch.8 §2 — Paging |
 | OSDev community | https://wiki.osdev.org |
 
 ---
@@ -243,6 +338,18 @@ xxd seng21213-os.img | grep -c aa55  # Verify boot signature
 | Feature implementation (correct behaviour) | 40% |
 | Code quality and comments | 20% |
 | Lab demo and viva questions | 10% |
+
+---
+
+## Submission
+
+This stage is tagged as `v0.4-stage3` on the `stage3` branch.
+
+```bash
+git checkout stage3
+git tag v0.4-stage3
+git push origin stage3 --tags
+```
 
 ---
 
