@@ -51,6 +51,48 @@ seng21213-os/
 
 ---
 
+## Shell Commands Reference
+
+The `ksh>` shell provides the following commands across all stages:
+
+### Stage 0 – Boot, VGA & Shell
+
+| Command | Description |
+|---------|-------------|
+| `help` | Show all shell commands |
+| `clear` | Clear the screen |
+| `about` | Show OS/course information |
+| `echo <text>` | Print text back to the screen |
+| `version` | Show kernel version |
+| `colour <fg> <bg>` | Change foreground/background colour |
+| `mem` | Show memory map (stub for Stage 3) |
+| `halt` | Halt the CPU |
+
+### Stage 1 – Process Management
+
+| Command | Description |
+|---------|-------------|
+| `ps` | List processes and CPU ticks |
+| `kill <pid>` | Terminate a process |
+
+### Stage 2 – Threads & Synchronization
+
+| Command | Description |
+|---------|-------------|
+| `threads` | Create and run the kernel thread demo |
+| `threadlist` | Show the thread table |
+| `race` | Demonstrate the race condition without a mutex |
+| `mutexdemo` | Demonstrate mutex-protected shared data |
+| `semdemo` | Run producer-consumer using semaphores |
+
+### Stage 3 – Physical Memory Manager
+
+| Command | Description |
+|---------|-------------|
+| `meminfo` | Show physical memory information and run the 100-frame PMM self-test |
+
+---
+
 ## Quick Start
 
 ### Option A: Docker (Recommended for all platforms)

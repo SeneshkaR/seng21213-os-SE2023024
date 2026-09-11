@@ -1,5 +1,5 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 3 – Physical Memory Manager)
+ * SENG21213-OS :: Main Kernel  (Stage 2 – Threads & Synchronization)
  * File   : kernel/kernel.c
  *
  * PURPOSE
@@ -7,17 +7,15 @@
  *     1. Initialises VGA text-mode display
  *     2. Initialises the keyboard driver
  *     3. Initialises process table, threads, and scheduler
- *     4. Initialises the Physical Memory Manager (Stage 3)
- *     5. Prints a splash screen
- *     6. Runs a minimal interactive shell ("ksh") as a scheduled process
- *     7. Two demo processes run concurrently with visible output
- *     8. Kernel thread, race condition, and mutex demos (Stage 2)
- *     9. Memory info command showing PMM statistics (Stage 3)
+ *     4. Prints a splash screen
+ *     5. Runs a minimal interactive shell ("ksh") as a scheduled process
+ *     6. Two demo processes run concurrently with visible output
+ *     7. Kernel thread, race condition, and mutex demos (Stage 2)
  *
  * ASSIGNMENT MILESTONES
  *   [done] Lecture  9  – Process Management  →  process.c, scheduler.c, switch.asm
  *   [done] Lecture 10  – Threads & Sync       →  thread.c, mutex.c, semaphore.c
- *   [done] Lecture 11  – Memory Management    →  pmm.c
+ *   [todo] Lecture 11  – Memory Management    →  pmm.c, vmm.c
  *   [todo] Lecture 12  – File System          →  fs.c, ramdisk.c
  *
  * CODING CONVENTION
@@ -34,7 +32,6 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
-#include "pmm.h"
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -43,7 +40,7 @@ static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
-static void cmd_meminfo(void);
+static void cmd_mem(void);
 static void cmd_version(void);
 static void cmd_colour(const char *args);
 static void cmd_halt(void);
@@ -162,7 +159,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 3: Physical Memory Manager", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 2: Threads & Synchronization", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Science - Software Engineering Teaching Unit",
@@ -187,8 +184,8 @@ static void print_splash(void) {
     vga_puts("Process Management  – DONE\n");
     vga_puts_color("    [L10] ", VGA_LIGHT_GREEN, VGA_BLACK);
     vga_puts("Threads & Sync      – DONE\n");
-    vga_puts_color("    [L11] ", VGA_LIGHT_GREEN, VGA_BLACK);
-    vga_puts("Memory Management   – DONE (physical page allocator)\n");
+    vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
+    vga_puts("Memory Management   – physical page allocator, virtual memory\n");
     vga_puts_color("    [L12] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("File System         – RAM disk, FAT-like directory structure\n");
     vga_puts("\n");
@@ -214,7 +211,7 @@ static void cmd_help(void) {
         "  version       Show kernel version\n"
         "  colour <fg> <bg>  Change text colour\n"
         "  halt          Halt the CPU\n"
-        "  meminfo       Show physical memory stats\n"
+        "  mem           Memory map (stub)\n"
         "\n"
     );
     vga_puts_color(
@@ -245,23 +242,13 @@ static void cmd_help(void) {
     );
 
     vga_puts_color(
-        "  Stage 3 - Physical Memory Manager\n",
-        VGA_LIGHT_CYAN,
-        VGA_BLACK
-    );
-
-    vga_puts(
-        "  meminfo       Show total / used / free physical frames\n"
-        "\n"
-    );
-
-    vga_puts_color(
         "  Future milestones\n",
         VGA_LIGHT_CYAN,
         VGA_BLACK
     );
 
     vga_puts(
+        "  free          [L11] Show free memory\n"
         "  ls            [L12] List files\n"
         "  cat           [L12] Print file contents\n"
     );}
@@ -272,7 +259,7 @@ static void cmd_clear(void) {
 
 static void cmd_about(void) {
     vga_puts_color("\n  About SENG21213-OS\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ----------------------------------------\n");
+    vga_puts("  ─────────────────────────────────────────────\n");
     vga_puts("  Architecture : x86 (i686), 32-bit Protected Mode\n");
     vga_puts("  Bootloader   : Custom MBR (NASM)\n");
     vga_puts("  Kernel       : Freestanding C (GCC, no libc)\n");
@@ -287,87 +274,24 @@ static void cmd_echo(const char *args) {
     vga_puts("\n");
 }
 
-/* ---------------------------------------------------------------------------
- * Stage 3 / L11 §3 — meminfo: Physical Memory Manager statistics
- *
- * Reads the bitmap-based PMM to report total, used, and free 4 KB frames.
- * The E820 memory map was collected by the bootloader in Real Mode and
- * stored at 0x4FFC (count) and 0x5000 (entries).
- *
- * Reference: L11 §3 — Bitmap page-frame allocator
- * --------------------------------------------------------------------------*/
-static void cmd_meminfo(void)
-{
-    uint32_t total = pmm_total_frames();
-    uint32_t used  = pmm_used_frames();
-    uint32_t free  = pmm_free_frames();
-
-    uint32_t total_kb = total * (PMM_FRAME_SIZE / 1024);
-    uint32_t used_kb  = used  * (PMM_FRAME_SIZE / 1024);
-    uint32_t free_kb  = free  * (PMM_FRAME_SIZE / 1024);
-
-    vga_puts_color("\n  Physical Memory Manager (L11 §3)\n",
+static void cmd_mem(void) {
+    /* Stage 0 stub – students implement the real PMM in Lecture 11 */
+    vga_puts_color("\n  Memory Map (stub – implement PMM in Lecture 11)\n",
                    VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ---------------------------------------------\n");
-    vga_puts("  Frame size       : 4 KB (4096 bytes)\n");
-    vga_printf("  Total frames     : %u\n", total);
-    vga_printf("  Used frames      : %u\n", used);
-    vga_printf("  Free frames      : %u\n", free);
-    vga_puts("\n");
-    vga_printf("  Total memory     : %u KB (%u MB)\n", total_kb, total_kb / 1024);
-    vga_printf("  Used memory      : %u KB\n", used_kb);
-    vga_printf("  Free memory      : %u KB (%u MB)\n", free_kb, free_kb / 1024);
-    vga_puts("\n");
-
-    /* Self-test: allocate and free 100 frames, verify no leaks */
-    vga_puts_color("  Self-test: allocating 100 frames...\n",
+    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  0x00000000 – 0x000FFFFF  :  First 1 MB (reserved/BIOS)\n");
+    vga_puts("  0x00100000 – 0x00EFFFFF  :  Extended memory (usable ~14 MB)\n");
+    vga_puts("  0x00F00000 – 0x00FFFFFF  :  BIOS / ROM area\n");
+    vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
+    vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
                    VGA_YELLOW, VGA_BLACK);
-
-    uint32_t before_used = pmm_used_frames();
-    uint32_t addrs[100];
-    int alloc_ok = 1;
-    int i;
-
-    for (i = 0; i < 100; i++) {
-        addrs[i] = pmm_alloc_frame();
-        if (addrs[i] == 0) {
-            alloc_ok = 0;
-            break;
-        }
-    }
-
-    if (!alloc_ok) {
-        vga_puts_color("  FAIL: could not allocate 100 frames.\n",
-                       VGA_LIGHT_RED, VGA_BLACK);
-    } else {
-        uint32_t after_alloc = pmm_used_frames();
-
-        /* Free all 100 frames */
-        for (i = 0; i < 100; i++) {
-            pmm_free_frame(addrs[i]);
-        }
-
-        uint32_t after_free = pmm_used_frames();
-
-        if (after_alloc == before_used + 100 && after_free == before_used) {
-            vga_puts_color("  PASS: 100 frames allocated and freed, no leaks.\n",
-                           VGA_LIGHT_GREEN, VGA_BLACK);
-        } else {
-            vga_puts_color("  FAIL: frame count mismatch after alloc/free.\n",
-                           VGA_LIGHT_RED, VGA_BLACK);
-            vga_printf("  Before: %u, After alloc: %u, After free: %u\n",
-                       before_used, after_alloc, after_free);
-        }
-    }
-
-    vga_puts("\n");
 }
 
 static void cmd_version(void) {
     vga_puts_color("\n  SENG21213-OS Version\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ---------------------------------------------\n");
-    vga_puts("  Stage 3: Physical Memory Manager\n");
-    vga_puts("  Version: 0.4.0\n");
+    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  Stage 2: Threads & Synchronization\n");
+    vga_puts("  Version: 0.3.0\n");
     vga_puts("  Build Date: " __DATE__ " " __TIME__ "\n");
     vga_puts("  Compiler: GCC " __VERSION__ "\n");
     vga_puts("  Architecture: x86 (i686) 32-bit Protected Mode\n");
@@ -881,7 +805,7 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "clear")   == 0) { cmd_clear();   continue; }
         if (k_strcmp(cmd, "about")   == 0) { cmd_about();   continue; }
         if (k_strcmp(cmd, "version") == 0) { cmd_version(); continue; }
-        if (k_strcmp(cmd, "meminfo") == 0) { cmd_meminfo(); continue; }
+        if (k_strcmp(cmd, "mem")     == 0) { cmd_mem();     continue; }
         if (k_strcmp(cmd, "halt")    == 0) { cmd_halt();    continue; }
 
         /* Check for echo command with space prefix */
@@ -949,7 +873,8 @@ static void shell_run(void) {
          }
 
         /* Future milestones */
-        if (k_strcmp(cmd, "ls")   == 0 ||
+        if (k_strcmp(cmd, "free") == 0 ||
+            k_strcmp(cmd, "ls")   == 0 ||
             k_strcmp(cmd, "cat")  == 0) {
 
             vga_puts_color(
@@ -972,14 +897,22 @@ static void shell_run(void) {
 }
 
 static void test_process_a(void) {
+    /* L09 - Demo process that prints visible output at a faster rate */
     while (1) {
-        __asm__ __volatile__("nop");
+        vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+        vga_puts("[A]");
+        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        for (volatile int i = 0; i < 3000000; i++);
     }
 }
 
 static void test_process_b(void) {
+    /* L09 - Demo process that prints visible output at a slower rate */
     while (1) {
-        __asm__ __volatile__("nop");
+        vga_set_color(VGA_YELLOW, VGA_BLACK);
+        vga_puts("[B]");
+        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+        for (volatile int i = 0; i < 6000000; i++);
     }
 }
 
@@ -991,14 +924,10 @@ void kernel_main(void) {
     vga_init();
     kb_init();
 
-    /* Stage 1–2 initialization */
+    /* Stage 2 initialization */
     proc_init();
     thread_init();
     scheduler_init();
-
-    /* Stage 3 / L11 §3 — Physical Memory Manager init
-     * Parses BIOS E820 map and builds the page-frame bitmap. */
-    pmm_init();
 
     print_splash();
 
