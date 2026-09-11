@@ -1,3 +1,16 @@
+/* =============================================================================
+ * SENG21213-OS :: Blocking Mutex
+ * Stage 2 - Lecture L10 §4
+ *
+ * Implements a blocking mutex with a FIFO wait queue.
+ * - mutex_lock()   : acquire the lock, or block the calling thread if held
+ * - mutex_unlock() : release the lock, transferring ownership to the next
+ *                    waiting thread if one exists
+ *
+ * Reference: Stallings Ch.4 — Mutual Exclusion
+ * =============================================================================
+ */
+
 #include "mutex.h"
 #include "scheduler.h"
 

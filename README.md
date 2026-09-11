@@ -1,4 +1,4 @@
-# SENG21213-OS — Stage 0: Kernel Foundations
+# SENG21213-OS — Stage 2: Threads & Synchronization
 
 > **Course**: SENG 21213 – Computer Architecture & Operating Systems  
 > **Year**: 2nd Year, Software Engineering  
@@ -8,7 +8,7 @@
 
 ## What Is This?
 
-This is **Stage 0** of your semester-long OS assignment. Over 5 lecture milestones
+This is **Stage 2** of your semester-long OS assignment. Over 5 lecture milestones
 (Lectures 8–12), your team will transform this minimal kernel into a functioning
 operating system with process management, threading, memory management, and a
 file system.
@@ -16,12 +16,18 @@ file system.
 ```
 seng21213-os/
 ├── boot/
-│   └── boot.asm          ← MBR Bootloader (NASM, 16-bit → 32-bit transition)
+│   ├── boot.asm          ← MBR Bootloader (NASM, 16-bit → 32-bit transition)
+│   └── switch.asm        ← IRQ0 context switch stub (pushad/iretd)
 ├── kernel/
 │   ├── kernel_entry.asm  ← Protected-mode entry, calls kernel_main()
-│   ├── kernel.c          ← Main kernel: shell loop, command dispatch
+│   ├── kernel.c          ← Main kernel: shell loop, command dispatch, demos
 │   ├── vga.c / vga.h     ← VGA 80×25 text-mode driver
 │   ├── keyboard.c / .h   ← PS/2 keyboard polling driver
+│   ├── process.c / .h    ← Stage 1: PCB table, process creation
+│   ├── scheduler.c / .h  ← Stage 1+2: IDT, PIC, PIT, round-robin scheduler
+│   ├── thread.c / .h     ← Stage 2: kernel threads with own stacks
+│   ├── mutex.c / .h      ← Stage 2: blocking mutex with wait queue
+│   └── semaphore.c / .h  ← Stage 2: counting semaphore
 ├── include/
 │   └── types.h           ← Primitive types (no libc!)
 ├── linker.ld             ← Linker script (kernel at 0x10000)
@@ -34,13 +40,13 @@ seng21213-os/
 
 ## Milestone Schedule
 
-| Lecture | Milestone | Files to Add |
-|---------|-----------|-------------|
-| L08 | ✅ Stage 0 – Boot + VGA + Shell | *Given to you* |
-| L09 | Process Management | `kernel/process.c`, `kernel/scheduler.c` |
-| L10 | Threads & Synchronisation | `kernel/thread.c`, `kernel/mutex.c` |
-| L11 | Memory Management | `kernel/pmm.c`, `kernel/vmm.c` |
-| L12 | File System | `kernel/fs.c`, `kernel/ramdisk.c` |
+| Lecture | Milestone | Status | Files |
+|---------|-----------|--------|-------|
+| L08 | Stage 0 – Boot + VGA + Shell | Done | *Given* |
+| L09 | Process Management | Done | `kernel/process.c`, `kernel/scheduler.c`, `boot/switch.asm` |
+| L10 | Threads & Synchronisation | Done | `kernel/thread.c`, `kernel/mutex.c`, `kernel/semaphore.c` |
+| L11 | Memory Management | TODO | `kernel/pmm.c`, `kernel/vmm.c` |
+| L12 | File System | TODO | `kernel/fs.c`, `kernel/ramdisk.c` |
 
 ---
 
@@ -143,6 +149,56 @@ void   process_yield(void);        /* Trigger context switch */
 void   process_exit(void);
 void   scheduler_tick(void);       /* Called by timer IRQ (Lecture 10) */
 ```
+
+---
+
+## Stage 2: Threads & Synchronization (Lecture 10)
+
+Stage 2 adds kernel-level threading and synchronization primitives.
+
+### Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `threads` | Create two kernel threads that print interleaved output |
+| `threadlist` | Display the thread table (TID, state, owner PID) |
+| `race` | Demonstrate a race condition on `myglobal` (no mutex) |
+| `mutexdemo` | Same race, but protected by a blocking mutex |
+| `semdemo` | Producer/consumer with counting semaphores and bounded buffer |
+
+### Key Concepts Demonstrated
+
+- **Kernel threads**: Each thread has its own 4 KB stack and CPU context,
+  but shares the owning process's address space.
+- **Round-robin scheduling**: The scheduler alternates between processes and
+  threads on each PIT tick (100 Hz).
+- **Race conditions**: `race` shows lost updates when two threads read-modify-write
+  a shared variable with a forced context switch between read and write.
+- **Mutex**: `mutexdemo` shows the same scenario with a blocking mutex.
+  The mutex maintains a FIFO wait queue; ownership transfers directly on unlock.
+- **Semaphore**: `semdemo` implements a bounded-buffer producer/consumer.
+  `empty_sem` and `full_sem` coordinate access; `buffer_mutex` protects the
+  shared buffer.
+
+---
+
+## Testing Stage 2
+
+After building and running (`make run`), verify each deliverable:
+
+| Test | Command | Expected Result |
+|------|---------|-----------------|
+| Kernel threads | `threads` | Two threads print `[T1]` and `[T2]` interleaved, then report "finished" |
+| Thread table | `threadlist` | Lists all threads with TID, state, and owner PID |
+| Race condition | `race` | Two threads increment `myglobal` 1000 times each. Final value < 2000 (lost updates) |
+| Mutex protection | `mutexdemo` | Same test with mutex. Final value = 2000 (no lost updates). Shows "PASS" |
+| Semaphore coordination | `semdemo` | 2 producers insert 5 items each, 1 consumer extracts all 10. Buffer empty at end. Shows "PASS" |
+
+### What to look for
+
+- **`race`**: The actual value should be significantly less than 2000, clearly showing lost updates
+- **`mutexdemo`**: The actual value must equal 2000, proving the mutex prevented data corruption
+- **`semdemo`**: All 10 items produced and consumed without corruption, buffer count = 0 at end
 
 ---
 
