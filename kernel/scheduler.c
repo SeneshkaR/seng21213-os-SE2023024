@@ -1,6 +1,6 @@
 /* =============================================================================
  * SENG21213-OS :: Round-Robin Scheduler
- * Stage 1 - Lecture L09
+ * Stage 2 - Lecture L09
  * =============================================================================
  */
 
@@ -8,6 +8,7 @@
 #include "process.h"
 #include "vga.h"
 #include "../include/types.h"
+#include "thread.h"
 
 /* IRQ0 assembly entry point */
 extern void irq0_stub(void);
@@ -173,8 +174,32 @@ static void pit_init(void) {
  * Round-Robin queue
  * ------------------------------------------------------------------------- */
 
+/* Stage 1 process run queue */
 static pcb_t *ready_head = 0;
 static pcb_t *current = 0;
+
+/* Stage 2 thread run queue */
+static thread_t *thread_head = 0;
+static thread_t *current_sched_thread = 0;
+
+/*
+ * What kind of execution context is currently on the CPU?
+ *
+ * 0 = boot/kernel_main
+ * 1 = process
+ * 2 = thread
+ */
+#define SCHED_NONE     0
+#define SCHED_PROCESS  1
+#define SCHED_THREAD   2
+
+static int current_kind = SCHED_NONE;
+
+/*
+ * Used to alternate between processes and threads.
+ */
+static int prefer_thread = 0;
+
 static volatile uint32_t system_ticks = 0;
 
 void scheduler_add_process(pcb_t *proc) {
@@ -200,28 +225,154 @@ void scheduler_add_process(pcb_t *proc) {
     proc->next = ready_head;
 }
 
-void scheduler_init(void) {
+/* -------------------------------------------------------------------------
+ * Stage 2 - Add a kernel thread to the round-robin thread queue.
+ * ------------------------------------------------------------------------- */
+void scheduler_add_thread(thread_t *thread) {
+    thread_t *last;
+
+    if (!thread) {
+        return;
+    }
+
+    if (!thread_head) {
+        thread_head = thread;
+        thread->next = thread;
+        return;
+    }
+
+    last = thread_head;
+
+    while (last->next != thread_head) {
+        last = last->next;
+    }
+
+    last->next = thread;
+    thread->next = thread_head;
+}
+
+/* -------------------------------------------------------------------------
+ * Blocking helpers used by mutexes and semaphores.
+ * ------------------------------------------------------------------------- */
+void scheduler_block_thread(thread_t *thread)
+{
+    if (!thread) {
+        return;
+    }
+
+    thread->state = THREAD_BLOCKED;
+}
+
+
+void scheduler_unblock_thread(thread_t *thread)
+{
+    if (!thread) {
+        return;
+    }
+
+    if (thread->state == THREAD_BLOCKED) {
+        thread->state = THREAD_READY;
+    }
+}
+
+void scheduler_init(void)
+{
     ready_head = 0;
     current = 0;
+
+    thread_head = 0;
+    current_sched_thread = 0;
+
+    current_kind = SCHED_NONE;
+    prefer_thread = 0;
+
+    system_ticks = 0;
 
     idt_init();
     pic_remap();
     pit_init();
 }
 
-/*
- * Called by irq0_stub every 10 ms.
- */
-uint32_t scheduler_irq(uint32_t saved_esp) {
-    system_ticks++;
-
+static pcb_t *find_next_process(void)
+{
     pcb_t *next;
     pcb_t *start;
 
-    /*
-     * Save context of currently running process.
-     */
+    if (!ready_head) {
+        return 0;
+    }
+
     if (current) {
+        next = current->next;
+    } else {
+        next = ready_head;
+    }
+
+    if (!next) {
+        return 0;
+    }
+
+    start = next;
+
+    do {
+        if (next->state == PROC_STATE_READY) {
+            return next;
+        }
+
+        next = next->next;
+
+    } while (next && next != start);
+
+    return 0;
+}
+
+
+static thread_t *find_next_thread(void)
+{
+    thread_t *next;
+    thread_t *start;
+
+    if (!thread_head) {
+        return 0;
+    }
+
+    if (current_sched_thread) {
+        next = current_sched_thread->next;
+    } else {
+        next = thread_head;
+    }
+
+    if (!next) {
+        return 0;
+    }
+
+    start = next;
+
+    do {
+        if (next->state == THREAD_READY) {
+            return next;
+        }
+
+        next = next->next;
+
+    } while (next && next != start);
+
+    return 0;
+}
+
+uint32_t scheduler_irq(uint32_t saved_esp)
+{
+    pcb_t *next_proc = 0;
+    thread_t *next_thread = 0;
+
+    system_ticks++;
+
+    /* -------------------------------------------------------------
+     * Save the currently running context.
+     * ------------------------------------------------------------- */
+
+    if (current_kind == SCHED_PROCESS && current) {
+
         current->esp = saved_esp;
         current->total_ticks++;
 
@@ -229,43 +380,91 @@ uint32_t scheduler_irq(uint32_t saved_esp) {
             current->state = PROC_STATE_READY;
         }
 
-        next = current->next;
-    } else {
-        /*
-         * First timer interrupt:
-         * kernel_main itself is not a process.
-         */
-        next = ready_head;
+    } else if (current_kind == SCHED_THREAD &&
+               current_sched_thread) {
+
+        current_sched_thread->esp = saved_esp;
+
+        if (current_sched_thread->state == THREAD_RUNNING) {
+            current_sched_thread->state = THREAD_READY;
+        }
     }
 
-    if (!next) {
-        return saved_esp;
-    }
 
-    start = next;
+    /* -------------------------------------------------------------
+     * Alternate between processes and threads.
+     * ------------------------------------------------------------- */
 
-    do {
-        if (next->state == PROC_STATE_READY) {
-            current = next;
-            current->state = PROC_STATE_RUNNING;
+    if (prefer_thread) {
 
-            proc_set_current(current);
+        next_thread = find_next_thread();
 
-            return current->esp;
+        if (!next_thread) {
+            next_proc = find_next_process();
         }
 
-        next = next->next;
+    } else {
 
-    } while (next != start);
+        next_proc = find_next_process();
 
-    /*
-     * Nothing runnable.
-     */
-    if (current) {
+        if (!next_proc) {
+            next_thread = find_next_thread();
+        }
+    }
+
+    prefer_thread = !prefer_thread;
+
+
+    /* -------------------------------------------------------------
+     * Run a thread.
+     * ------------------------------------------------------------- */
+
+    if (next_thread) {
+
+        current_sched_thread = next_thread;
+
+        current_sched_thread->state = THREAD_RUNNING;
+
+        current_kind = SCHED_THREAD;
+
+        thread_set_current(current_sched_thread);
+
+        /*
+         * The thread shares its owning process.
+         * proc_current() therefore refers to that owner while the
+         * thread executes.
+         */
+        proc_set_current(current_sched_thread->owner);
+
+        return current_sched_thread->esp;
+    }
+
+
+    /* -------------------------------------------------------------
+     * Run a process.
+     * ------------------------------------------------------------- */
+
+    if (next_proc) {
+
+        current = next_proc;
+
         current->state = PROC_STATE_RUNNING;
+
+        current_kind = SCHED_PROCESS;
+
+        proc_set_current(current);
+
+        /* No kernel thread is executing now. */
+        thread_set_current(0);
+
         return current->esp;
     }
 
+
+    /*
+     * No runnable process/thread was found.
+     * Continue the current context.
+     */
     return saved_esp;
 }
 

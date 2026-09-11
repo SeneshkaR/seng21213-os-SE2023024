@@ -1,21 +1,22 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 1 – Process Management)
+ * SENG21213-OS :: Main Kernel  (Stage 2 – Threads & Synchronization)
  * File   : kernel/kernel.c
  *
  * PURPOSE
  *   This is the heart of your operating system. It now includes:
  *     1. Initialises VGA text-mode display
  *     2. Initialises the keyboard driver
- *     3. Initialises IDT, PIT, and scheduler (Stage 1)
+ *     3. Initialises process table, threads, and scheduler
  *     4. Prints a splash screen
  *     5. Runs a minimal interactive shell ("ksh") as a scheduled process
  *     6. Two demo processes run concurrently with visible output
+ *     7. Kernel thread, race condition, and mutex demos (Stage 2)
  *
  * ASSIGNMENT MILESTONES
- *   ✅ Lecture  9  – Process Management  →  process.c, scheduler.c, switch.asm
- *   ⏳ Lecture 10  – Threads             →  thread.c, mutex.c, semaphore.c
- *   ⏳ Lecture 11  – Memory Management   →  pmm.c, vmm.c
- *   ⏳ Lecture 12  – File System         →  fs.c, ramdisk.c
+ *   [done] Lecture  9  – Process Management  →  process.c, scheduler.c, switch.asm
+ *   [done] Lecture 10  – Threads & Sync       →  thread.c, mutex.c, semaphore.c
+ *   [todo] Lecture 11  – Memory Management    →  pmm.c, vmm.c
+ *   [todo] Lecture 12  – File System          →  fs.c, ramdisk.c
  *
  * CODING CONVENTION
  *   - Prefix kernel-internal functions with k_ (e.g. k_strcmp)
@@ -28,6 +29,9 @@
 #include "process.h"
 #include "scheduler.h"
 #include "../include/types.h"
+#include "thread.h"
+#include "mutex.h"
+#include "semaphore.h"
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -44,6 +48,55 @@ static void cmd_kill(const char *args);
 static void cmd_ps(void);
 static void test_process_a(void);
 static void test_process_b(void);
+static void cmd_threads(void);
+
+static void test_thread_a(void *arg);
+static void test_thread_b(void *arg);
+
+static void cmd_race(void);
+static void race_thread(void *arg);
+
+static void cmd_mutexdemo(void);
+static void mutex_thread(void *arg);
+
+static void cmd_semdemo(void);
+static void sem_producer(void *arg);
+static void sem_consumer(void *arg);
+
+static void cmd_threadlist(void);
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 - Race condition demonstration
+ * --------------------------------------------------------------------------*/
+
+/*
+ * Both race-demo threads modify this same variable.
+ * volatile forces actual memory reads/writes so the race is visible.
+ */
+static volatile int myglobal = 0;
+
+/* Number of race-demo threads that have finished. */
+static volatile int race_done = 0;
+
+#define RACE_ITERATIONS 1000
+
+static mutex_t myglobal_mutex;
+static volatile int mutex_done = 0;
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 - Semaphore demonstration (producer/consumer with a bounded buffer)
+ * --------------------------------------------------------------------------*/
+
+#define BUFFER_SIZE 4
+
+static volatile int buffer[BUFFER_SIZE];
+static volatile int buffer_count = 0;
+
+static semaphore_t empty_sem;   /* Counts empty slots  */
+static semaphore_t full_sem;    /* Counts filled slots */
+static mutex_t    buffer_mutex; /* Protects buffer access */
+
+static volatile int sem_done = 0;
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -106,7 +159,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 1: Process Table & Round-Robin Scheduler", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 2: Threads & Synchronization", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Science - Software Engineering Teaching Unit",
@@ -129,8 +182,8 @@ static void print_splash(void) {
     vga_puts("  Assignment milestones:\n");
     vga_puts_color("    [L09] ", VGA_LIGHT_GREEN, VGA_BLACK);
     vga_puts("Process Management  – DONE\n");
-    vga_puts_color("    [L10] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("Threads & Sync      – kernel threads, mutex, semaphore\n");
+    vga_puts_color("    [L10] ", VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_puts("Threads & Sync      – DONE\n");
     vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
     vga_puts("Memory Management   – physical page allocator, virtual memory\n");
     vga_puts_color("    [L12] ", VGA_YELLOW, VGA_BLACK);
@@ -161,7 +214,6 @@ static void cmd_help(void) {
         "  mem           Memory map (stub)\n"
         "\n"
     );
-
     vga_puts_color(
         "  Stage 1 - Process Management\n",
         VGA_LIGHT_CYAN,
@@ -175,18 +227,31 @@ static void cmd_help(void) {
     );
 
     vga_puts_color(
+        "  Stage 2 - Threads & Synchronization\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  threads       Create and run kernel thread demo\n"
+        "  threadlist    Show the thread table\n"
+        "  race          Demonstrate race condition (no mutex)\n"
+        "  mutexdemo     Demonstrate mutex-protected critical section\n"
+        "  semdemo       Producer/consumer with semaphores\n"
+        "\n"
+    );
+
+    vga_puts_color(
         "  Future milestones\n",
         VGA_LIGHT_CYAN,
         VGA_BLACK
     );
 
     vga_puts(
-        "  threads       [L10] List kernel threads\n"
         "  free          [L11] Show free memory\n"
         "  ls            [L12] List files\n"
         "  cat           [L12] Print file contents\n"
-    );
-}
+    );}
 
 static void cmd_clear(void) {
     vga_clear(VGA_BLACK);
@@ -225,8 +290,8 @@ static void cmd_mem(void) {
 static void cmd_version(void) {
     vga_puts_color("\n  SENG21213-OS Version\n", VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  Stage 1: Process Table & Round-Robin Scheduler\n");
-    vga_puts("  Version: 0.2.0\n");
+    vga_puts("  Stage 2: Threads & Synchronization\n");
+    vga_puts("  Version: 0.3.0\n");
     vga_puts("  Build Date: " __DATE__ " " __TIME__ "\n");
     vga_puts("  Compiler: GCC " __VERSION__ "\n");
     vga_puts("  Architecture: x86 (i686) 32-bit Protected Mode\n");
@@ -312,6 +377,417 @@ static void cmd_kill(const char *args) {
 static char  shell_buf[256];
 static char  prompt[] = "\n  ksh> ";
 
+/*
+ * Stage 2 / L10 §3 — Kernel Thread Demo
+ *
+ * Two threads that print interleaved output, demonstrating
+ * concurrent execution and voluntary context switching.
+ */
+static void test_thread_a(void *arg)
+{
+    (void)arg;
+
+    for (int i = 0; i < 8; i++) {
+        vga_puts("[T1] ");
+        scheduler_yield();
+    }
+
+    vga_puts("\nThread 1 finished.\n");
+    thread_exit();
+}
+
+static void test_thread_b(void *arg)
+{
+    (void)arg;
+
+    for (int i = 0; i < 8; i++) {
+        vga_puts("[T2] ");
+        scheduler_yield();
+    }
+
+    vga_puts("\nThread 2 finished.\n");
+    thread_exit();
+}
+
+/*
+ * Stage 2 / L10 §4 — Race Condition Demo
+ *
+ * Deliberately unsafe increment:
+ *
+ *     read myglobal
+ *     yield
+ *     write myglobal + 1
+ *
+ * Another thread can modify myglobal between the read and write,
+ * producing lost updates.
+ *
+ * Reference: Stallings Ch.4 — Mutual Exclusion violations
+ */
+static void race_thread(void *arg)
+{
+    int i;
+
+    (void)arg;
+
+    for (i = 0; i < RACE_ITERATIONS; i++) {
+        int temp;
+
+        /* READ shared value */
+        temp = myglobal;
+
+        /*
+         * Force a context switch between read and write.
+         * This makes the race condition easy to demonstrate.
+         */
+        scheduler_yield();
+
+        /* WRITE based on the old value */
+        myglobal = temp + 1;
+    }
+
+    race_done++;
+
+    thread_exit();
+}
+
+/*
+ * Stage 2 / L10 §4 — Mutex-Protected Critical Section
+ *
+ * Same race scenario as race_thread(), but wrapped in mutex_lock/unlock.
+ * The mutex ensures only one thread modifies myglobal at a time.
+ */
+static void mutex_thread(void *arg)
+{
+    int i;
+
+    (void)arg;
+
+    for (i = 0; i < RACE_ITERATIONS; i++) {
+
+        mutex_lock(&myglobal_mutex);
+
+        /*
+         * Critical section.
+         */
+        int temp = myglobal;
+
+        /*
+         * Force scheduling while lock is held.
+         * The other thread must block on the mutex.
+         */
+        scheduler_yield();
+
+        myglobal = temp + 1;
+
+        mutex_unlock(&myglobal_mutex);
+    }
+
+    mutex_done++;
+
+    thread_exit();
+}
+
+static void cmd_mutexdemo(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    myglobal = 0;
+    mutex_done = 0;
+
+    mutex_init(&myglobal_mutex);
+
+    vga_puts("\n");
+    vga_puts("========================================\n");
+    vga_puts(" Stage 2 - Mutex Demo\n");
+    vga_puts(" WITH MUTEX\n");
+    vga_puts("========================================\n");
+
+    vga_printf(
+        "Two threads increment myglobal %d times each.\n",
+        RACE_ITERATIONS
+    );
+
+    vga_printf(
+        "Expected final value: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_puts("Starting protected test...\n\n");
+
+    t1 = thread_create(mutex_thread, 0);
+    t2 = thread_create(mutex_thread, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "ERROR: Could not create mutex test threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    while (mutex_done < 2) {
+        scheduler_yield();
+    }
+
+    vga_puts("\nMutex test completed.\n");
+
+    vga_printf(
+        "Expected: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_printf(
+        "Actual:   %d\n",
+        myglobal
+    );
+
+    if (myglobal == RACE_ITERATIONS * 2) {
+        vga_puts_color(
+            "RESULT: PASS - mutex prevented lost updates.\n",
+            VGA_LIGHT_GREEN,
+            VGA_BLACK
+        );
+    } else {
+        vga_puts_color(
+            "RESULT: FAIL - data corruption detected.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    }
+
+    vga_puts("\n");
+}
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 / L10 §5 — Bounded-Buffer Producer/Consumer with Semaphores
+ *
+ * Uses three synchronization primitives:
+ *   - empty_sem  : counts empty buffer slots (initialised to BUFFER_SIZE)
+ *   - full_sem   : counts filled buffer slots (initialised to 0)
+ *   - buffer_mutex : protects the shared buffer array
+ *
+ * Reference: Stallings Ch.4 — Producer/Consumer problem
+ * --------------------------------------------------------------------------*/
+
+static void sem_producer(void *arg)
+{
+    int id = (int)(uint32_t)arg;
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        /* Wait for an empty slot */
+        sem_wait(&empty_sem);
+
+        mutex_lock(&buffer_mutex);
+        buffer[buffer_count] = id * 100 + i;
+        buffer_count++;
+        vga_printf("  Producer %d inserted item %d (buffer: %d/%d)\n",
+                   id, buffer[buffer_count - 1], buffer_count, BUFFER_SIZE);
+        mutex_unlock(&buffer_mutex);
+
+        /* Signal that a slot is now full */
+        sem_signal(&full_sem);
+
+        scheduler_yield();
+    }
+
+    sem_done++;
+    thread_exit();
+}
+
+static void sem_consumer(void *arg)
+{
+    int i;
+
+    (void)arg;
+
+    for (i = 0; i < 5; i++) {
+        /* Wait for a full slot */
+        sem_wait(&full_sem);
+
+        mutex_lock(&buffer_mutex);
+        buffer_count--;
+        int item = buffer[buffer_count];
+        vga_printf("  Consumer extracted item %d (buffer: %d/%d)\n",
+                   item, buffer_count, BUFFER_SIZE);
+        mutex_unlock(&buffer_mutex);
+
+        /* Signal that a slot is now empty */
+        sem_signal(&empty_sem);
+
+        scheduler_yield();
+    }
+
+    sem_done++;
+    thread_exit();
+}
+
+static void cmd_semdemo(void)
+{
+    thread_t *p1, *p2, *c1;
+
+    buffer_count = 0;
+    sem_done = 0;
+
+    sem_init(&empty_sem, BUFFER_SIZE);
+    sem_init(&full_sem, 0);
+    mutex_init(&buffer_mutex);
+
+    vga_puts("\n");
+    vga_puts("========================================\n");
+    vga_puts(" Stage 2 - Semaphore Demo\n");
+    vga_puts(" Producer/Consumer with bounded buffer\n");
+    vga_puts("========================================\n");
+
+    vga_printf("Buffer size: %d\n", BUFFER_SIZE);
+    vga_puts("2 producers (5 items each), 1 consumer\n\n");
+
+    p1 = thread_create(sem_producer, (void *)1);
+    p2 = thread_create(sem_producer, (void *)2);
+    c1 = thread_create(sem_consumer, (void *)1);
+
+    if (!p1 || !p2 || !c1) {
+        vga_puts_color(
+            "ERROR: Could not create semaphore demo threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /* Wait for all 3 threads to finish */
+    while (sem_done < 3) {
+        scheduler_yield();
+    }
+
+    vga_puts("\nSemaphore demo completed.\n");
+    vga_printf("Final buffer count: %d (expected 0)\n", buffer_count);
+
+    if (buffer_count == 0) {
+        vga_puts_color(
+            "RESULT: PASS - semaphore coordination correct.\n",
+            VGA_LIGHT_GREEN,
+            VGA_BLACK
+        );
+    } else {
+        vga_puts_color(
+            "RESULT: FAIL - buffer count mismatch.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    }
+
+    vga_puts("\n");
+}
+
+/* ---------------------------------------------------------------------------
+ * Stage 2 - Thread table listing
+ * --------------------------------------------------------------------------*/
+static void cmd_threadlist(void)
+{
+    thread_list();
+}
+
+static void cmd_race(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    myglobal = 0;
+    race_done = 0;
+
+    vga_puts("\n");
+    vga_puts("========================================\n");
+    vga_puts(" Stage 2 - Race Condition Demo\n");
+    vga_puts(" WITHOUT MUTEX\n");
+    vga_puts("========================================\n");
+
+    vga_printf(
+        "Two threads increment myglobal %d times each.\n",
+        RACE_ITERATIONS
+    );
+
+    vga_printf(
+        "Expected final value: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_puts("Starting race...\n\n");
+
+    t1 = thread_create(race_thread, 0);
+    t2 = thread_create(race_thread, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "ERROR: Could not create race threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * The shell waits, but yields the CPU so the two worker
+     * threads can run.
+     */
+    while (race_done < 2) {
+        scheduler_yield();
+    }
+
+    vga_puts("\nRace completed.\n");
+
+    vga_printf(
+        "Expected: %d\n",
+        RACE_ITERATIONS * 2
+    );
+
+    vga_printf(
+        "Actual:   %d\n",
+        myglobal
+    );
+
+    if (myglobal != RACE_ITERATIONS * 2) {
+        vga_puts_color(
+            "RESULT: RACE CONDITION DETECTED - lost updates occurred.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+    } else {
+        vga_puts_color(
+            "RESULT: No lost update observed in this run.\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+    }
+
+    vga_puts("\n");
+}
+
+static void cmd_threads(void)
+{
+    thread_t *t1;
+    thread_t *t2;
+
+    vga_puts("\nCreating two Stage 2 kernel threads...\n");
+
+    t1 = thread_create(test_thread_a, 0);
+    t2 = thread_create(test_thread_b, 0);
+
+    if (!t1 || !t2) {
+        vga_puts_color(
+            "Failed to create threads.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    vga_printf("Thread %d created.\n", t1->tid);
+    vga_printf("Thread %d created.\n", t2->tid);
+}
+
 static void shell_run(void) {
     vga_puts_color("\n  Kernel Shell ready. Type 'help' for commands.\n",
                    VGA_LIGHT_GREEN, VGA_BLACK);
@@ -324,7 +800,7 @@ static void shell_run(void) {
         const char *cmd = k_ltrim(shell_buf);
         if (k_strlen(cmd) == 0) continue;
 
-        /* Dispatch - Stage 0 & 1 commands */
+        /* Dispatch - Stage 0 commands */
         if (k_strcmp(cmd, "help")    == 0) { cmd_help();    continue; }
         if (k_strcmp(cmd, "clear")   == 0) { cmd_clear();   continue; }
         if (k_strcmp(cmd, "about")   == 0) { cmd_about();   continue; }
@@ -366,13 +842,40 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "kill") == 0) {
             cmd_kill("");
             continue;
-        } 
+        }
+        /* Stage 2 - kernel thread demo */
+        if (k_strcmp(cmd, "threads") == 0) {
+            cmd_threads();
+            continue;
+         }
 
-        /* Milestone stubs for later stages */
-        if (k_strcmp(cmd, "threads") == 0 ||
-            k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
+        /* Stage 2 - race condition without mutex */
+        if (k_strcmp(cmd, "race") == 0) {
+            cmd_race();
+            continue;
+         }
+
+        if (k_strcmp(cmd, "mutexdemo") == 0) {
+            cmd_mutexdemo();
+            continue;
+         }
+
+        /* Stage 2 - semaphore producer/consumer demo */
+        if (k_strcmp(cmd, "semdemo") == 0) {
+            cmd_semdemo();
+            continue;
+         }
+
+        /* Stage 2 - thread table listing */
+        if (k_strcmp(cmd, "threadlist") == 0) {
+            cmd_threadlist();
+            continue;
+         }
+
+        /* Future milestones */
+        if (k_strcmp(cmd, "free") == 0 ||
+            k_strcmp(cmd, "ls")   == 0 ||
+            k_strcmp(cmd, "cat")  == 0) {
 
             vga_puts_color(
                 "  [TODO] This command is not yet implemented.\n",
@@ -394,23 +897,21 @@ static void shell_run(void) {
 }
 
 static void test_process_a(void) {
-    /* L09 §4 - Demo process that prints visible output at a faster rate */
+    /* L09 - Demo process that prints visible output at a faster rate */
     while (1) {
         vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
         vga_puts("[A]");
         vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-        /* Delay loop - shorter than process B for faster printing */
         for (volatile int i = 0; i < 3000000; i++);
     }
 }
 
 static void test_process_b(void) {
-    /* L09 §4 - Demo process that prints visible output at a slower rate */
+    /* L09 - Demo process that prints visible output at a slower rate */
     while (1) {
         vga_set_color(VGA_YELLOW, VGA_BLACK);
         vga_puts("[B]");
         vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-        /* Delay loop - longer than process A for slower printing */
         for (volatile int i = 0; i < 6000000; i++);
     }
 }
@@ -423,8 +924,9 @@ void kernel_main(void) {
     vga_init();
     kb_init();
 
-    /* Stage 1 initialization */
+    /* Stage 2 initialization */
     proc_init();
+    thread_init();
     scheduler_init();
 
     print_splash();
