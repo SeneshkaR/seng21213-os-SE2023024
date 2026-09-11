@@ -9,6 +9,10 @@
 [BITS 16]           ; CPU starts in 16-bit Real Mode
 [ORG 0x7C00]        ; BIOS loads the MBR at this fixed address
 
+E820_MAP_ADDR  equ 0x5000
+E820_COUNT_ADDR equ 0x4FFC
+E820_ENTRY_SIZE equ 24
+
 ; ---------------------------------------------------------------------------
 ; Entry: Real Mode setup
 ; ---------------------------------------------------------------------------
@@ -24,6 +28,40 @@ start:
     ; Save drive number (BIOS stores it in dl)
     mov  [boot_drive], dl
 
+    ; ------------------------------------------------------------
+    ; Stage 3 - Collect BIOS E820 memory map
+    ; Stores:
+    ;   entry count at 0x4FFC
+    ;   entries starting at 0x5000
+    ; ------------------------------------------------------------
+
+    xor ebx, ebx
+    xor bp, bp
+
+    mov di, E820_MAP_ADDR
+
+.e820_next:
+    mov eax, 0xE820
+    mov edx, 0x534D4150
+    mov ecx, E820_ENTRY_SIZE
+
+    mov dword [es:di + 20], 1
+
+    int 0x15
+    jc .e820_done
+
+    cmp eax, 0x534D4150
+    jne .e820_done
+
+    add di, E820_ENTRY_SIZE
+    inc bp
+
+    test ebx, ebx
+    jnz .e820_next
+
+.e820_done:
+    mov [E820_COUNT_ADDR], bp
+
     ; Print loading banner using BIOS int 0x10
     mov  si, msg_banner
     call print_rm
@@ -31,8 +69,8 @@ start:
     call print_rm
 
 ; ---------------------------------------------------------------------------
-; Load kernel: read sectors 2..65 from disk into memory at 0x1000:0x0000
-; This gives us 64 × 512 = 32 768 bytes for the kernel (Stage 0)
+; Load kernel: read sectors 2..129 from disk into memory at 0x1000:0x0000
+; This gives us 128 × 512 = 65 536 bytes for the kernel (Stage 3 — PMM bitmap)
 ; ---------------------------------------------------------------------------
 load_kernel:
     mov  bx, 0x1000        ; ES:BX = 0x10000 (kernel load address)
@@ -40,7 +78,7 @@ load_kernel:
     xor  bx, bx
 
     mov  ah, 0x02          ; BIOS read sectors
-    mov  al, 64            ; Number of sectors to read
+    mov  al, 128           ; Number of sectors to read (Stage 3: larger kernel)
     mov  ch, 0             ; Cylinder 0
     mov  cl, 2             ; Start from sector 2 (sector 1 is MBR)
     mov  dh, 0             ; Head 0
