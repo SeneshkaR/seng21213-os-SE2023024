@@ -272,7 +272,7 @@ static void cmd_clear(void) {
 
 static void cmd_about(void) {
     vga_puts_color("\n  About SENG21213-OS\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  ----------------------------------------\n");
     vga_puts("  Architecture : x86 (i686), 32-bit Protected Mode\n");
     vga_puts("  Bootloader   : Custom MBR (NASM)\n");
     vga_puts("  Kernel       : Freestanding C (GCC, no libc)\n");
@@ -308,7 +308,7 @@ static void cmd_meminfo(void)
 
     vga_puts_color("\n  Physical Memory Manager (L11 §3)\n",
                    VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  ---------------------------------------------\n");
     vga_puts("  Frame size       : 4 KB (4096 bytes)\n");
     vga_printf("  Total frames     : %u\n", total);
     vga_printf("  Used frames      : %u\n", used);
@@ -365,7 +365,7 @@ static void cmd_meminfo(void)
 
 static void cmd_version(void) {
     vga_puts_color("\n  SENG21213-OS Version\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  ---------------------------------------------\n");
     vga_puts("  Stage 3: Physical Memory Manager\n");
     vga_puts("  Version: 0.4.0\n");
     vga_puts("  Build Date: " __DATE__ " " __TIME__ "\n");
@@ -972,32 +972,14 @@ static void shell_run(void) {
 }
 
 static void test_process_a(void) {
-    int count = 0;
-
     while (1) {
-        if (count < 10) {
-            vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-            vga_puts("[A]");
-            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-            count++;
-        }
-
-        for (volatile int i = 0; i < 3000000; i++);
+        __asm__ __volatile__("nop");
     }
 }
 
 static void test_process_b(void) {
-    int count = 0;
-
     while (1) {
-        if (count < 10) {
-            vga_set_color(VGA_YELLOW, VGA_BLACK);
-            vga_puts("[B]");
-            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-            count++;
-        }
-
-        for (volatile int i = 0; i < 6000000; i++);
+        __asm__ __volatile__("nop");
     }
 }
 
