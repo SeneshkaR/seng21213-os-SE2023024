@@ -1,5 +1,16 @@
 # SENG21213-OS — Stage 4: RAM Disk File System
 
+## Submission Information
+
+**Student Name:** K.M. Seneshka Randilini  
+**Student Number:** SE/2023/024  
+**Course:** SENG 21213 – Computer Architecture & Operating Systems  
+**Department:** Software Engineering  
+**University:** University of Kelaniya  
+**Submission:** Complete OS Implementation (Stages 0-4)
+
+---
+
 > **Course**: SENG 21213 – Computer Architecture & Operating Systems  
 > **Year**: 2nd Year, Software Engineering  
 > **Assignment**: Build your own x86 Operating System
