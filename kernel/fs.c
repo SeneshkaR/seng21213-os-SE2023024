@@ -12,7 +12,7 @@
 
 #include "fs.h"
 #include "vga.h"
-#include "../include/string.h"
+#include "string.h"
 
 /* ---------------------------------------------------------------------------
  * RAM Disk - 1 MB byte array in BSS
@@ -510,12 +510,15 @@ int fs_list_dir(void)
     int count = 0;
 
     vga_puts_color("\n  Directory listing:\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  ---------------------------------------------\n");
 
     for (int i = 0; i < FS_MAX_DIR_ENTRIES; i++) {
         if (dir[i].inode != 0) {
             inode_t *inode = fs_get_inode(dir[i].inode);
-            vga_printf("  %-28s  %5u bytes\n", dir[i].name, inode->size);
+            vga_puts("  ");
+            vga_puts(dir[i].name);
+            vga_puts("  ");
+            vga_printf("%u bytes\n", inode->size);
             count++;
         }
     }
@@ -536,7 +539,7 @@ void fs_print_stats(void)
     superblock_t *sb = fs_superblock();
 
     vga_puts_color("\n  RAM Disk File System Statistics\n", VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
+    vga_puts("  ---------------------------------------------\n");
     vga_printf("  Total size       : %u KB\n", FS_RAMDISK_SIZE / 1024);
     vga_printf("  Block size       : %u bytes\n", FS_BLOCK_SIZE);
     vga_printf("  Total blocks     : %u\n", sb->total_blocks);

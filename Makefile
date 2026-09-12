@@ -27,13 +27,14 @@ ASFLAGS  := -f elf32
 ifneq (, $(shell which i686-elf-gcc 2>/dev/null))
     CC   := i686-elf-gcc
     LD   := i686-elf-ld
-    CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -nostdlib -Wall -Wextra -O2 -I./include
+    CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -nostdlib \
+          -Wall -Wextra -O2 -I./include
     LDFLAGS := -m elf_i386 -nostdlib
 else
     CC   := gcc
     LD   := ld
-    CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pie -nostdlib \
-              -Wall -Wextra -O2 -I./include
+    CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-builtin -fno-stack-protector -fno-pie -nostdlib \
+          -Wall -Wextra -O2 -I./include
     LDFLAGS := -m elf_i386 -nostdlib
 endif
 
