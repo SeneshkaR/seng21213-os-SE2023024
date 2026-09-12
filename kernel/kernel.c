@@ -1,5 +1,5 @@
 /* =============================================================================
- * SENG21213-OS :: Main Kernel  (Stage 2 – Threads & Synchronization)
+ * SENG21213-OS :: Main Kernel  (Stage 4 – RAM Disk File System)
  * File   : kernel/kernel.c
  *
  * PURPOSE
@@ -7,16 +7,18 @@
  *     1. Initialises VGA text-mode display
  *     2. Initialises the keyboard driver
  *     3. Initialises process table, threads, and scheduler
- *     4. Prints a splash screen
- *     5. Runs a minimal interactive shell ("ksh") as a scheduled process
- *     6. Two demo processes run concurrently with visible output
- *     7. Kernel thread, race condition, and mutex demos (Stage 2)
+ *     4. Initialises Physical Memory Manager (Stage 3)
+ *     5. Initialises RAM Disk File System (Stage 4)
+ *     6. Prints a splash screen
+ *     7. Runs a minimal interactive shell ("ksh") as a scheduled process
+ *     8. Two demo processes run concurrently with visible output
+ *     9. Kernel thread, race condition, and mutex demos (Stage 2)
  *
  * ASSIGNMENT MILESTONES
  *   [done] Lecture  9  – Process Management  →  process.c, scheduler.c, switch.asm
  *   [done] Lecture 10  – Threads & Sync       →  thread.c, mutex.c, semaphore.c
- *   [todo] Lecture 11  – Memory Management    →  pmm.c, vmm.c
- *   [todo] Lecture 12  – File System          →  fs.c, ramdisk.c
+ *   [done] Lecture 11  – Memory Management    →  pmm.c
+ *   [done] Lecture 12  – File System          →  fs.c
  *
  * CODING CONVENTION
  *   - Prefix kernel-internal functions with k_ (e.g. k_strcmp)
@@ -32,6 +34,8 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
+#include "fs.h"
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -64,6 +68,17 @@ static void sem_producer(void *arg);
 static void sem_consumer(void *arg);
 
 static void cmd_threadlist(void);
+
+/* Stage 3 commands */
+static void cmd_meminfo(void);
+
+/* Stage 4 commands */
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_write(const char *args);
+static void cmd_rm(const char *args);
+static void cmd_fsstats(void);
 
 /* ---------------------------------------------------------------------------
  * Stage 2 - Race condition demonstration
@@ -159,7 +174,7 @@ static void print_splash(void) {
                    VGA_YELLOW, VGA_BLACK);
 
     vga_set_cursor(2, 2);
-    vga_puts_color("  Stage 2: Threads & Synchronization", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts_color("  Stage 4: RAM Disk File System", VGA_LIGHT_CYAN, VGA_BLACK);
 
     vga_set_cursor(3, 2);
     vga_puts_color("  Faculty of Science - Software Engineering Teaching Unit",
@@ -184,10 +199,10 @@ static void print_splash(void) {
     vga_puts("Process Management  – DONE\n");
     vga_puts_color("    [L10] ", VGA_LIGHT_GREEN, VGA_BLACK);
     vga_puts("Threads & Sync      – DONE\n");
-    vga_puts_color("    [L11] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("Memory Management   – physical page allocator, virtual memory\n");
-    vga_puts_color("    [L12] ", VGA_YELLOW, VGA_BLACK);
-    vga_puts("File System         – RAM disk, FAT-like directory structure\n");
+    vga_puts_color("    [L11] ", VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_puts("Memory Management   – DONE (physical page allocator)\n");
+    vga_puts_color("    [L12] ", VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_puts("File System         – DONE (RAM disk file system)\n");
     vga_puts("\n");
 }
 
@@ -242,15 +257,29 @@ static void cmd_help(void) {
     );
 
     vga_puts_color(
-        "  Future milestones\n",
+        "  Stage 3 - Physical Memory Manager\n",
         VGA_LIGHT_CYAN,
         VGA_BLACK
     );
 
     vga_puts(
-        "  free          [L11] Show free memory\n"
-        "  ls            [L12] List files\n"
-        "  cat           [L12] Print file contents\n"
+        "  meminfo       Show physical memory statistics\n"
+        "\n"
+    );
+
+    vga_puts_color(
+        "  Stage 4 - RAM Disk File System\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts(
+        "  ls            List files in the file system\n"
+        "  touch <name>  Create an empty file\n"
+        "  cat <name>    Display file contents\n"
+        "  write <name> <text>  Write text to a file\n"
+        "  rm <name>     Remove a file\n"
+        "  fsstats       Show file system statistics\n"
     );}
 
 static void cmd_clear(void) {
@@ -290,8 +319,8 @@ static void cmd_mem(void) {
 static void cmd_version(void) {
     vga_puts_color("\n  SENG21213-OS Version\n", VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  Stage 2: Threads & Synchronization\n");
-    vga_puts("  Version: 0.3.0\n");
+    vga_puts("  Stage 4: RAM Disk File System\n");
+    vga_puts("  Version: 0.5.0\n");
     vga_puts("  Build Date: " __DATE__ " " __TIME__ "\n");
     vga_puts("  Compiler: GCC " __VERSION__ "\n");
     vga_puts("  Architecture: x86 (i686) 32-bit Protected Mode\n");
@@ -788,6 +817,190 @@ static void cmd_threads(void)
     vga_printf("Thread %d created.\n", t2->tid);
 }
 
+/* ---------------------------------------------------------------------------
+ * Stage 3 - Memory info command (L11 §3)
+ * --------------------------------------------------------------------------*/
+static void cmd_meminfo(void)
+{
+    uint32_t total = pmm_total_frames();
+    uint32_t used = pmm_used_frames();
+    uint32_t free = pmm_free_frames();
+
+    vga_puts("\n");
+    vga_puts_color("Physical Memory Manager (L11 §3)\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("---------------------------------------------\n");
+    vga_printf("Total frames : %u\n", total);
+    vga_printf("Used frames  : %u\n", used);
+    vga_printf("Free frames  : %u\n", free);
+    vga_printf("Frame size   : %u bytes\n", PMM_FRAME_SIZE);
+    vga_printf("Total memory : %u KB\n", (total * PMM_FRAME_SIZE) / 1024);
+    vga_printf("Used memory  : %u KB\n", (used * PMM_FRAME_SIZE) / 1024);
+    vga_printf("Free memory  : %u KB\n", (free * PMM_FRAME_SIZE) / 1024);
+    vga_puts("\n");
+
+    /* Self-test: allocate and free 100 frames */
+    vga_puts_color("Self-test: Allocating and freeing 100 frames...\n", VGA_YELLOW, VGA_BLACK);
+
+    uint32_t frames[100];
+    int allocated = 0;
+
+    for (int i = 0; i < 100; i++) {
+        uint32_t addr = pmm_alloc_frame();
+        if (addr == 0) {
+            vga_printf("Failed to allocate frame %d\n", i);
+            break;
+        }
+        frames[i] = addr;
+        allocated++;
+    }
+
+    uint32_t used_after_alloc = pmm_used_frames();
+    vga_printf("Allocated %d frames. Used frames now: %u\n", allocated, used_after_alloc);
+
+    for (int i = 0; i < allocated; i++) {
+        pmm_free_frame(frames[i]);
+    }
+
+    uint32_t used_after_free = pmm_used_frames();
+    vga_printf("Freed %d frames. Used frames now: %u\n", allocated, used_after_free);
+
+    if (used_after_free == used) {
+        vga_puts_color("PASS: No memory leaks detected.\n", VGA_LIGHT_GREEN, VGA_BLACK);
+    } else {
+        vga_puts_color("FAIL: Memory leak detected!\n", VGA_LIGHT_RED, VGA_BLACK);
+    }
+    vga_puts("\n");
+}
+
+/* ---------------------------------------------------------------------------
+ * Stage 4 - File system commands (L12 §2)
+ * --------------------------------------------------------------------------*/
+
+/* ls - List files in the file system */
+static void cmd_ls(void)
+{
+    fs_list_dir();
+}
+
+/* touch <filename> - Create an empty file */
+static void cmd_touch(const char *args)
+{
+    if (k_strlen(args) == 0) {
+        vga_puts_color("Usage: touch <filename>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+
+    int result = fs_create_file(args);
+    if (result == 0) {
+        vga_printf("Created file: %s\n", args);
+    } else {
+        vga_printf("Failed to create file: %s\n", args);
+    }
+}
+
+/* cat <filename> - Display file contents */
+static void cmd_cat(const char *args)
+{
+    if (k_strlen(args) == 0) {
+        vga_puts_color("Usage: cat <filename>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+
+    int fd = fs_open(args, 0); /* Open existing file */
+    if (fd < 0) {
+        vga_printf("File not found: %s\n", args);
+        return;
+    }
+
+    char buffer[256];
+    int bytes_read;
+
+    vga_puts("\n");
+    while ((bytes_read = fs_read(fd, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes_read] = '\0';
+        vga_puts(buffer);
+    }
+    vga_puts("\n\n");
+
+    fs_close(fd);
+}
+
+/* write <filename> <text> - Write text to a file (creates if doesn't exist) */
+static void cmd_write(const char *args)
+{
+    if (k_strlen(args) == 0) {
+        vga_puts_color("Usage: write <filename> <text>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+
+    /* Find the first space to separate filename from text */
+    const char *space = args;
+    while (*space && *space != ' ') {
+        space++;
+    }
+
+    if (*space == '\0') {
+        vga_puts_color("Usage: write <filename> <text>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+
+    /* Extract filename */
+    char filename[64];
+    int fname_len = space - args;
+    if (fname_len >= (int)sizeof(filename)) {
+        fname_len = sizeof(filename) - 1;
+    }
+    for (int i = 0; i < fname_len; i++) {
+        filename[i] = args[i];
+    }
+    filename[fname_len] = '\0';
+
+    /* Skip the space */
+    const char *text = space + 1;
+    while (*text == ' ') {
+        text++;
+    }
+
+    /* Open or create file */
+    int fd = fs_open(filename, 1); /* Create if doesn't exist */
+    if (fd < 0) {
+        vga_printf("Failed to open/create file: %s\n", filename);
+        return;
+    }
+
+    /* Write text */
+    int bytes_written = fs_write(fd, text, k_strlen(text));
+    fs_close(fd);
+
+    if (bytes_written > 0) {
+        vga_printf("Wrote %d bytes to %s\n", bytes_written, filename);
+    } else {
+        vga_printf("Failed to write to %s\n", filename);
+    }
+}
+
+/* rm <filename> - Remove a file */
+static void cmd_rm(const char *args)
+{
+    if (k_strlen(args) == 0) {
+        vga_puts_color("Usage: rm <filename>\n", VGA_LIGHT_RED, VGA_BLACK);
+        return;
+    }
+
+    int result = fs_unlink(args);
+    if (result == 0) {
+        vga_printf("Removed: %s\n", args);
+    } else {
+        vga_printf("Failed to remove: %s\n", args);
+    }
+}
+
+/* fsstats - Display file system statistics */
+static void cmd_fsstats(void)
+{
+    fs_print_stats();
+}
+
 static void shell_run(void) {
     vga_puts_color("\n  Kernel Shell ready. Type 'help' for commands.\n",
                    VGA_LIGHT_GREEN, VGA_BLACK);
@@ -872,21 +1085,60 @@ static void shell_run(void) {
             continue;
          }
 
-        /* Future milestones */
-        if (k_strcmp(cmd, "free") == 0 ||
-            k_strcmp(cmd, "ls")   == 0 ||
-            k_strcmp(cmd, "cat")  == 0) {
+        /* Stage 3 - memory info */
+        if (k_strcmp(cmd, "meminfo") == 0) {
+            cmd_meminfo();
+            continue;
+        }
 
-            vga_puts_color(
-                "  [TODO] This command is not yet implemented.\n",
-                VGA_YELLOW,
-                VGA_BLACK
-            );
+        /* Stage 4 - file system commands */
+        if (k_strcmp(cmd, "ls") == 0) {
+            cmd_ls();
+            continue;
+        }
 
-            vga_puts(
-                "  Implement it as part of your lecture assignment.\n"
-            );
+        if (k_strncmp(cmd, "touch ", 6) == 0) {
+            cmd_touch(k_ltrim(cmd + 6));
+            continue;
+        }
 
+        if (k_strcmp(cmd, "touch") == 0) {
+            cmd_touch("");
+            continue;
+        }
+
+        if (k_strncmp(cmd, "cat ", 4) == 0) {
+            cmd_cat(k_ltrim(cmd + 4));
+            continue;
+        }
+
+        if (k_strcmp(cmd, "cat") == 0) {
+            cmd_cat("");
+            continue;
+        }
+
+        if (k_strncmp(cmd, "write ", 6) == 0) {
+            cmd_write(k_ltrim(cmd + 6));
+            continue;
+        }
+
+        if (k_strcmp(cmd, "write") == 0) {
+            cmd_write("");
+            continue;
+        }
+
+        if (k_strncmp(cmd, "rm ", 3) == 0) {
+            cmd_rm(k_ltrim(cmd + 3));
+            continue;
+        }
+
+        if (k_strcmp(cmd, "rm") == 0) {
+            cmd_rm("");
+            continue;
+        }
+
+        if (k_strcmp(cmd, "fsstats") == 0) {
+            cmd_fsstats();
             continue;
         }
 
@@ -928,6 +1180,12 @@ void kernel_main(void) {
     proc_init();
     thread_init();
     scheduler_init();
+
+    /* Stage 3 initialization - Physical Memory Manager */
+    pmm_init();
+
+    /* Stage 4 initialization - RAM Disk File System */
+    fs_init();
 
     print_splash();
 

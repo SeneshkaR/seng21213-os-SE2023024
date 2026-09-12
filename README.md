@@ -1,4 +1,4 @@
-# SENG21213-OS — Stage 3: Physical Memory Manager
+# SENG21213-OS — Stage 4: RAM Disk File System
 
 > **Course**: SENG 21213 – Computer Architecture & Operating Systems  
 > **Year**: 2nd Year, Software Engineering  
@@ -8,7 +8,7 @@
 
 ## What Is This?
 
-This is **Stage 3** of your semester-long OS assignment. Over 5 lecture milestones
+This is **Stage 4** of your semester-long OS assignment. Over 5 lecture milestones
 (Lectures 8–12), your team will transform this minimal kernel into a functioning
 operating system with process management, threading, memory management, and a
 file system.
@@ -28,7 +28,9 @@ seng21213-os/
 │   ├── thread.c / .h     ← Stage 2: kernel threads with own stacks
 │   ├── mutex.c / .h      ← Stage 2: blocking mutex with wait queue
 │   ├── semaphore.c / .h  ← Stage 2: counting semaphore
-│   └── pmm.c / pmm.h     ← Stage 3: Physical Memory Manager (bitmap allocator)
+│   ├── pmm.c / pmm.h     ← Stage 3: Physical Memory Manager (bitmap allocator)
+│   ├── fs.c / fs.h       ← Stage 4: RAM Disk File System (inode-based)
+│   └── string.c / string.h ← String library (freestanding environment)
 ├── include/
 │   └── types.h           ← Primitive types (no libc!)
 ├── linker.ld             ← Linker script (kernel at 0x10000)
@@ -46,8 +48,8 @@ seng21213-os/
 | L08 | Stage 0 – Boot + VGA + Shell | Done | *Given* |
 | L09 | Process Management | Done | `kernel/process.c`, `kernel/scheduler.c`, `boot/switch.asm` |
 | L10 | Threads & Synchronisation | Done | `kernel/thread.c`, `kernel/mutex.c`, `kernel/semaphore.c` |
-| L11 | Memory Management | **Done** | `kernel/pmm.c`, `kernel/pmm.h` |
-| L12 | File System | TODO | `kernel/fs.c`, `kernel/ramdisk.c` |
+| L11 | Memory Management | Done | `kernel/pmm.c`, `kernel/pmm.h` |
+| L12 | File System | **Done** | `kernel/fs.c`, `kernel/fs.h`, `kernel/string.c`, `kernel/string.h` |
 
 ---
 
@@ -90,6 +92,17 @@ The `ksh>` shell provides the following commands across all stages:
 | Command | Description |
 |---------|-------------|
 | `meminfo` | Show physical memory information and run the 100-frame PMM self-test |
+
+### Stage 4 – RAM Disk File System
+
+| Command | Description |
+|---------|-------------|
+| `ls` | List all files in the file system |
+| `touch <name>` | Create an empty file |
+| `cat <name>` | Display file contents |
+| `write <name> <text>` | Write text to a file (creates if doesn't exist) |
+| `rm <name>` | Remove a file |
+| `fsstats` | Show file system statistics |
 
 ---
 
@@ -275,6 +288,172 @@ Free memory      : 28672 KB (28 MB)
 Self-test: allocating 100 frames...
 PASS: 100 frames allocated and freed, no leaks.
 ```
+
+---
+
+## Stage 4: RAM Disk File System (Lecture 12)
+
+Stage 4 implements a complete inode-based file system on a 1 MB RAM disk.
+
+### Implementation Details
+
+**RAM Disk** (`kernel/fs.c`)
+- 1 MB byte array in BSS segment (256 blocks × 4 KB)
+- Persistent across file operations within a boot session
+- Formatted on initialization with superblock, bitmaps, and directory
+
+**File System Layout**
+```
+Block 0:     Superblock (magic number, metadata)
+Block 1:     Directory entries (filename → inode mapping)
+Block 2:     Block bitmap (tracks free data blocks)
+Block 3:     Inode bitmap (tracks free inodes)
+Blocks 4-35: Inodes (32 blocks × 32 inodes = 1024 inodes)
+Blocks 36-255: Data blocks (220 blocks × 4 KB = 880 KB)
+```
+
+**Superblock Structure**
+```c
+typedef struct {
+    uint32_t magic;          // Magic number (0x53454E47 = "SENG")
+    uint32_t total_blocks;   // Total blocks in file system
+    uint32_t inode_blocks;   // Number of blocks for inodes
+    uint32_t data_blocks;    // Number of data blocks
+    uint32_t free_blocks;    // Count of free data blocks
+    uint32_t free_inodes;    // Count of free inodes
+} superblock_t;
+```
+
+**Inode Structure**
+```c
+typedef struct {
+    uint32_t size;              // File size in bytes
+    uint32_t blocks[8];         // 8 direct block pointers
+    uint8_t  reserved[92];      // Padding to 128 bytes
+} inode_t;
+```
+
+**Directory Entry Structure**
+```c
+typedef struct {
+    char     name[28];      // Filename (null-terminated)
+    uint32_t inode;         // Inode number (0 = unused)
+} dir_entry_t;
+```
+
+**Key Functions**
+```c
+void fs_init(void);                          // Initialize file system
+int  fs_open(const char *filename, int create); // Open file (create if needed)
+int  fs_close(int fd);                       // Close file descriptor
+int  fs_read(int fd, void *buffer, uint32_t count);  // Read from file
+int  fs_write(int fd, const void *buffer, uint32_t count); // Write to file
+int  fs_unlink(const char *filename);        // Delete file
+int  fs_create_file(const char *filename);   // Create empty file
+int  fs_list_dir(void);                      // List all files
+void fs_print_stats(void);                   // Print file system statistics
+```
+
+**String Library** (`kernel/string.c`)
+- Custom implementation for freestanding environment (no libc)
+- Memory operations: `memset`, `memcpy`, `memmove`, `memcmp`
+- String operations: `strlen`, `strcpy`, `strncpy`, `strcmp`, `strncmp`, `strcat`, `strchr`, `strrchr`
+
+### Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `ls` | List all files with sizes |
+| `touch <name>` | Create an empty file |
+| `cat <name>` | Display file contents |
+| `write <name> <text>` | Write text to file (creates if doesn't exist) |
+| `rm <name>` | Delete a file |
+| `fsstats` | Show file system statistics |
+
+### Key Concepts Demonstrated
+
+- **Inode-based File System**: Each file has an inode with metadata and direct block pointers
+- **Bitmap Allocation**: Separate bitmaps track free data blocks and free inodes
+- **Superblock**: Stores file system metadata and magic number for validation
+- **Flat Directory**: Simple directory structure mapping filenames to inode numbers
+- **File Descriptors**: Track open files with current read/write position
+- **POSIX-style API**: Familiar open/read/write/close/unlink interface
+- **Direct Block Pointers**: Each inode has 8 direct pointers (max 32 KB per file)
+
+### Testing Stage 4
+
+After building and running (`make run`), verify the deliverables:
+
+| Test | Command | Expected Result |
+|------|---------|-----------------|
+| List files | `ls` | Shows empty directory or existing files |
+| Create file | `touch test.txt` | "Created file: test.txt" |
+| Write to file | `write test.txt Hello World` | "Wrote 11 bytes to test.txt" |
+| Read file | `cat test.txt` | Displays "Hello World" |
+| List again | `ls` | Shows "test.txt" with size 11 bytes |
+| Delete file | `rm test.txt` | "Removed: test.txt" |
+| Verify deletion | `ls` | File no longer appears |
+| File system stats | `fsstats` | Shows total/used/free blocks and inodes |
+
+### What to look for
+
+- **`ls`**: Should display filename and size for each file
+- **`touch`**: Creates file with 0 bytes
+- **`write`**: Creates file if it doesn't exist, appends if it does
+- **`cat`**: Displays exact contents that were written
+- **`rm`**: Frees inode and all data blocks
+- **`fsstats`**: Shows accurate block and inode usage
+
+### Example Output
+
+```
+ksh> touch hello.txt
+Created file: hello.txt
+
+ksh> write hello.txt Welcome to SENG21213-OS!
+Wrote 26 bytes to hello.txt
+
+ksh> cat hello.txt
+Welcome to SENG21213-OS!
+
+ksh> ls
+Directory listing:
+─────────────────────────────────────────────
+hello.txt                      26 bytes
+
+1 file(s)
+
+ksh> fsstats
+RAM Disk File System Statistics
+─────────────────────────────────────────────
+Total size       : 1024 KB
+Block size       : 4096 bytes
+Total blocks     : 256
+Data blocks      : 220
+Free data blocks : 219
+Used data blocks : 1
+Max inodes       : 1024
+Free inodes      : 1023
+Max file size    : 32 KB
+
+ksh> rm hello.txt
+Removed: hello.txt
+
+ksh> ls
+Directory listing:
+─────────────────────────────────────────────
+(empty)
+
+0 file(s)
+```
+
+### File System Limits
+
+- **Maximum file size**: 32 KB (8 direct blocks × 4 KB)
+- **Maximum files**: 1024 inodes
+- **Maximum filename length**: 27 characters (28 bytes including null terminator)
+- **RAM disk size**: 1 MB (256 blocks × 4 KB)
+- **Available data space**: 880 KB (220 data blocks)
 
 ---
 
