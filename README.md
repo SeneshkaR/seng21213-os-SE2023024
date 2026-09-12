@@ -551,6 +551,29 @@ xxd seng21213-os.img | grep -c aa55  # Verify boot signature
 
 ---
 
+## Extensions (Bonus Marks)
+
+### fsstats — File System Statistics Command
+
+**What it does:**
+The `fsstats` command displays detailed statistics about the RAM disk file system, including total/used/free blocks, total/used/free inodes, block size, and maximum file size.
+
+**How to test it:**
+```bash
+ksh> fsstats
+```
+Expected output shows file system statistics with accurate block and inode usage counts.
+
+**Lecture concept demonstrated:**
+L12 §2 — File system metadata and superblock information. This command reads the superblock structure to report file system state, demonstrating understanding of how file systems track resource allocation.
+
+**Implementation:**
+- Located in `kernel/fs.c` — `fs_print_stats()` function
+- Reads superblock fields: `total_blocks`, `data_blocks`, `free_blocks`, `free_inodes`
+- Shell command handler: `cmd_fsstats()` in `kernel/kernel.c`
+
+---
+
 ## Assessment Rubric (per milestone)
 
 | Criterion | Weight |
@@ -564,12 +587,12 @@ xxd seng21213-os.img | grep -c aa55  # Verify boot signature
 
 ## Submission
 
-This stage is tagged as `v0.4-stage3` on the `stage3` branch.
+This stage is tagged as `v0.5-stage4` on the `stage4` branch.
 
 ```bash
-git checkout stage3
-git tag v0.4-stage3
-git push origin stage3 --tags
+git checkout stage4
+git tag v0.5-stage4
+git push origin stage4 --tags
 ```
 
 ---
